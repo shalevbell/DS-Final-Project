@@ -10,6 +10,9 @@ services:
       DATABASE_URL: postgresql://postgres:postgres@postgres:5432/Helperviewer_db
       REDIS_URL: redis://redis:6379/0
       FLASK_ENV: development
+    volumes:
+      - ./backend:/app
+      - ./frontend:/frontend
     depends_on:
       postgres:
         condition: service_healthy
