@@ -1,5 +1,6 @@
 import logging
-from flask import Flask, jsonify
+import os
+from flask import Flask, jsonify, send_from_directory, render_template
 from flask_cors import CORS
 import psycopg2
 import redis
@@ -12,8 +13,20 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Initialize Flask app
-app = Flask(__name__)
+# Get the frontend directory path
+project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+frontend_dir = os.path.join(project_root, 'frontend')
+
+if not os.path.exists(frontend_dir):
+    frontend_dir = '/frontend'
+
+logger.info(f"Frontend directory: {frontend_dir}")
+
+# Initialize Flask app with frontend directory configuration
+app = Flask(__name__,
+            static_folder=frontend_dir,
+            static_url_path='',
+            template_folder=frontend_dir)
 app.config.from_object(Config)
 
 # Enable CORS
@@ -69,13 +82,16 @@ def health_check():
     return jsonify(response), status_code
 
 
-@app.route('/', methods=['GET'])
+@app.route('/')
 def index():
-    """Root endpoint."""
-    return jsonify({
-        'message': 'AI-Assisted Interview Analysis System API',
-        'health_check': '/api/health'
-    })
+    """Serve the frontend index.html."""
+    return send_from_directory(frontend_dir, 'index.html')
+
+
+@app.route('/frontend/<path:path>')
+def serve_frontend(path):
+    """Serve frontend static files (CSS, JS)."""
+    return send_from_directory(frontend_dir, path)
 
 
 if __name__ == '__main__':
