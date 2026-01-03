@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Interview Assistant</title>
+    <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+    <div class="container">
+        <header class="header">
+            <h1>Helperviewer</h1>
+        </header>
+
+        <div class="main-content">
+            <div class="video-panel">
+                <h2>Candidate Video</h2>
+                <div class="video-container">
+                    <video id="video-preview" autoplay muted></video>
+                    <div id="connection-status" class="connection-indicator">
+                        <span class="dot"></span>
+                        <span class="text">Camera Off</span>
+                    </div>
+                </div>
+
+                <div class="video-controls">
+                    <button id="btn-start-camera" class="btn btn-primary">
+                        Start Camera
+                    </button>
+                    <button id="btn-stop-camera" class="btn btn-danger" disabled>
+                        Stop Camera
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="js/app.js"></script>
+</body>
+</html>
