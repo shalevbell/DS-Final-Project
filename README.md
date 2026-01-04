@@ -1,74 +1,50 @@
-# DS-Final-Project: Helperviewer
+# Helperviewer
 
-AI-Assisted Interview Analysis System - Real-time multimodal interview assistant
+AI-powered interview assistant with real-time video capture and analysis.
 
 ## Quick Start
 
 ```bash
-# Start all services (Flask, PostgreSQL, Redis)
+# Start all services
 docker-compose up -d
 
-# Check service status
-docker-compose ps
+# Rebuild backend after code changes
+docker-compose up -d --build backend
 
 # View logs
 docker-compose logs -f backend
 
-# Stop all services
+# Stop services
 docker-compose down
 ```
 
-## API Endpoints
+## What It Does
 
-- `GET /` - API info
-- `GET /api/health` - Health check (tests Flask, PostgreSQL, and Redis connections)
+- Web-based camera capture interface for interviews
+- Real-time video processing backend
+- PostgreSQL for data storage
+- Redis for caching and session management
 
-## Testing
+## Access
 
-```bash
-# Test health endpoint
-curl http://localhost:5555/api/health
+- **Web App**: http://localhost:5555
+- **Health Check**: http://localhost:5555/api/health
 
-# Expected response:
-# {
-#   "status": "healthy",
-#   "flask": "running",
-#   "services": {
-#     "postgresql": {"status": "connected", "message": "Connected"},
-#     "redis": {"status": "connected", "message": "Connected"}
-#   }
-# }
-```
+## Tech Stack
 
-## Environment Variables
-
-Environment variables are optional (defaults provided in `backend/config.py`).
-
-To customize, copy `.env.example` to `.env` and modify values:
-
-```bash
-cp .env.example .env
-```
+- Frontend: HTML/CSS/JavaScript with camera capture
+- Backend: Flask (Python)
+- Database: PostgreSQL
+- Cache: Redis
+- Deployment: Docker Compose
 
 ## Project Structure
 
 ```
 .
-├── backend/
-│   ├── app.py              # Flask application
-│   ├── config.py           # Configuration with defaults
-│   ├── requirements.txt    # Python dependencies
-│   └── Dockerfile          # Container definition
-├── docker-compose.yml      # Service orchestration
-└── README.md
+├── frontend/          # Web interface with camera capture
+├── backend/           # Flask API
+│   ├── app.py
+│   └── config.py
+└── docker-compose.yml
 ```
-
-## Services
-
-- **Flask API**: http://localhost:5555
-- **PostgreSQL**: localhost:5432
-- **Redis**: localhost:6379
-
-Note: Port 5555 is used instead of 5000 to avoid conflicts with macOS AirPlay Receiver.
-
----
