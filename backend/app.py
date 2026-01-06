@@ -1,7 +1,11 @@
 import logging
 import os
-from flask import Flask, jsonify, send_from_directory, render_template
+import time
+import json
+import base64
+from flask import Flask, jsonify, send_from_directory
 from flask_cors import CORS
+from flask_socketio import SocketIO, emit
 import psycopg2
 import redis
 from config import Config
@@ -31,6 +35,25 @@ app.config.from_object(Config)
 
 # Enable CORS
 CORS(app, origins=Config.CORS_ORIGINS)
+
+# Initialize SocketIO
+socketio = SocketIO(app, cors_allowed_origins=Config.CORS_ORIGINS, async_mode='eventlet')
+
+# Initialize Redis connection (lazy - will connect when needed)
+redis_client = None
+
+def get_redis():
+    """Get Redis client, connecting if needed."""
+    global redis_client
+    if redis_client is None:
+        try:
+            redis_client = redis.from_url(Config.REDIS_URL, decode_responses=False)
+            redis_client.ping()
+            logger.info('✅ Redis connected')
+        except Exception as e:
+            logger.error(f'❌ Redis connection failed: {e}')
+            redis_client = None
+    return redis_client
 
 
 def test_postgres_connection():
@@ -94,6 +117,135 @@ def serve_frontend(path):
     return send_from_directory(frontend_dir, path)
 
 
+# WebSocket event handlers
+@socketio.on('connect')
+def handle_connect():
+    """Handle client connection."""
+    logger.info('Client connected')
+    emit('connected', {'status': 'connected', 'message': 'WebSocket connection established'})
+
+
+@socketio.on('disconnect')
+def handle_disconnect():
+    """Handle client disconnection."""
+    logger.info('Client disconnected')
+
+
+@socketio.on('request_camera_permission')
+def handle_camera_permission_request(data=None):
+    logger.info('Camera permission requested')
+    emit('camera_permission_requested', {'status': 'requested', 'message': 'Please grant camera and microphone permissions'})
+
+
+@socketio.on('camera_status')
+def handle_camera_status(data):
+    if isinstance(data, dict):
+        logger.info(f'Camera status: {data.get("status", "unknown")}')
+        emit('camera_status_ack', {'status': 'received', 'data': data})
+
+
+@socketio.on('stream_ready')
+def handle_stream_ready(data):
+    if isinstance(data, dict):
+        session_id = data.get('sessionId')
+        logger.info(f'Stream ready: session={session_id}, video={data.get("video")}, audio={data.get("audio")}')
+        
+        # Initialize stream storage in Redis
+        if session_id:
+            r = get_redis()
+            if r:
+                try:
+                    metadata = {
+                        'sessionId': session_id,
+                        'startTime': data.get('timestamp', int(time.time())),
+                        'video': data.get('video'),
+                        'audio': data.get('audio'),
+                        'status': 'active'
+                    }
+                    r.setex(f'stream:{session_id}:metadata', 3600, json.dumps(metadata))
+                    logger.info(f'✅ Stream metadata stored for session {session_id}')
+                except Exception as e:
+                    logger.error(f'❌ Error storing metadata: {e}')
+        
+        emit('stream_acknowledged', {'status': 'ready', 'sessionId': session_id})
+
+
+@socketio.on('camera_error')
+def handle_camera_error(data):
+    if isinstance(data, dict):
+        logger.error(f'Camera error: {data.get("error", "Unknown")} - {data.get("message", "")}')
+
+
+@socketio.on('video_chunk')
+def handle_video_chunk(data):
+    """Handle video chunk from client and store in Redis."""
+    if not isinstance(data, dict):
+        return
+    
+    session_id = data.get('sessionId')
+    chunk_data = data.get('chunk')
+    timestamp = data.get('timestamp', int(time.time()))
+    
+    if not session_id or not chunk_data:
+        logger.warning('Invalid video chunk data received')
+        return
+    
+    r = get_redis()
+    if not r:
+        logger.error('❌ Redis not available, cannot store chunk')
+        return
+    
+    try:
+        # Store chunk in Redis list (each chunk is base64 encoded)
+        chunk_key = f'stream:{session_id}:chunks'
+        result = r.rpush(chunk_key, chunk_data)
+        
+        # Set expiration on the chunk list (1 hour)
+        r.expire(chunk_key, 3600)
+        
+        # Update last chunk timestamp
+        r.setex(f'stream:{session_id}:last_chunk', 60, timestamp)
+        
+        chunk_count = r.llen(chunk_key)
+        logger.info(f'✅ Stored video chunk for session {session_id} - chunk #{result}, total: {chunk_count}')
+    except Exception as e:
+        logger.error(f'❌ Error storing video chunk: {e}')
+
+
+@socketio.on('test_redis')
+def handle_test_redis(data):
+    """Test Redis connection."""
+    logger.info('🧪 Testing Redis connection...')
+    
+    try:
+        r = get_redis()
+        if r:
+            # Test basic operations
+            test_key = 'test:connection'
+            r.setex(test_key, 10, 'test_value')
+            value = r.get(test_key)
+            r.delete(test_key)
+            
+            logger.info('✅ Redis connection test successful!')
+            emit('redis_test_result', {
+                'status': 'success',
+                'message': 'Redis connection working',
+                'test_value': value.decode() if isinstance(value, bytes) else value
+            })
+        else:
+            logger.error('❌ Redis connection test failed - client is None')
+            emit('redis_test_result', {
+                'status': 'failed',
+                'message': 'Redis client not available'
+            })
+    except Exception as e:
+        logger.error(f'❌ Redis connection test error: {e}')
+        emit('redis_test_result', {
+            'status': 'error',
+            'message': str(e)
+        })
+
+
 if __name__ == '__main__':
-    logger.info(f"Starting Flask app on port 5000 (ENV: {Config.FLASK_ENV})")
-    app.run(host='0.0.0.0', port=5000, debug=Config.DEBUG)
+    logger.info(f"Starting Flask app with SocketIO on port 5000 (ENV: {Config.FLASK_ENV})")
+    socketio.run(app, host='0.0.0.0', port=5000, debug=Config.DEBUG)
