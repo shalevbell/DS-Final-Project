@@ -3,6 +3,8 @@ import os
 import time
 import json
 import base64
+import shutil
+import subprocess
 from flask import Flask, jsonify, send_from_directory
 from flask_cors import CORS
 from flask_socketio import SocketIO, emit
@@ -37,10 +39,18 @@ app.config.from_object(Config)
 CORS(app, origins=Config.CORS_ORIGINS)
 
 # Initialize SocketIO
-socketio = SocketIO(app, cors_allowed_origins=Config.CORS_ORIGINS, async_mode='eventlet')
+# Increase buffer size for large 30s video chunks.
+socketio = SocketIO(
+    app,
+    cors_allowed_origins=Config.CORS_ORIGINS,
+    async_mode='eventlet',
+    max_http_buffer_size=100 * 1024 * 1024
+)
 
 # Initialize Redis connection (lazy - will connect when needed)
 redis_client = None
+TMP_DIR = os.path.join(os.path.dirname(__file__), 'tmp')
+os.makedirs(TMP_DIR, exist_ok=True)
 
 def get_redis():
     """Get Redis client, connecting if needed."""
@@ -185,6 +195,9 @@ def handle_video_chunk(data):
     session_id = data.get('sessionId')
     chunk_data = data.get('chunk')
     timestamp = data.get('timestamp', int(time.time()))
+    chunk_index = data.get('chunkIndex')
+    mime_type = data.get('mimeType')
+    duration_ms = data.get('durationMs')
     
     if not session_id or not chunk_data:
         logger.warning('Invalid video chunk data received')
@@ -195,21 +208,112 @@ def handle_video_chunk(data):
         logger.error('❌ Redis not available, cannot store chunk')
         return
     
+    ffmpeg_path = shutil.which('ffmpeg')
+    if not ffmpeg_path:
+        logger.error('❌ ffmpeg not available, cannot convert chunk to mp4/mp3')
+        return
+
+    input_bytes = None
+    if isinstance(chunk_data, (bytes, bytearray, memoryview)):
+        input_bytes = bytes(chunk_data)
+    elif isinstance(chunk_data, list):
+        input_bytes = bytes(chunk_data)
+    elif isinstance(chunk_data, dict) and isinstance(chunk_data.get('data'), list):
+        input_bytes = bytes(chunk_data['data'])
+    else:
+        if isinstance(chunk_data, bytes):
+            chunk_data = chunk_data.decode('utf-8', errors='ignore')
+        if isinstance(chunk_data, str):
+            chunk_data = chunk_data.strip()
+            # Fix missing base64 padding from some browsers.
+            padding = len(chunk_data) % 4
+            if padding:
+                chunk_data += '=' * (4 - padding)
+        try:
+            input_bytes = base64.b64decode(chunk_data)
+        except Exception as e:
+            logger.error(f'❌ Failed to decode chunk base64: {e}')
+            return
+
+    chunk_label = chunk_index if chunk_index is not None else int(timestamp)
+    input_path = os.path.join(TMP_DIR, f'{session_id}_{chunk_label}.webm')
+    output_video_path = os.path.join(TMP_DIR, f'{session_id}_{chunk_label}.mp4')
+    output_audio_path = os.path.join(TMP_DIR, f'{session_id}_{chunk_label}.mp3')
+
     try:
-        # Store chunk in Redis list (each chunk is base64 encoded)
-        chunk_key = f'stream:{session_id}:chunks'
-        result = r.rpush(chunk_key, chunk_data)
-        
-        # Set expiration on the chunk list (1 hour)
-        r.expire(chunk_key, 3600)
-        
-        # Update last chunk timestamp
+        with open(input_path, 'wb') as f:
+            f.write(input_bytes)
+
+        video_proc = subprocess.run(
+            [
+                ffmpeg_path, '-y',
+                '-i', input_path,
+                '-c:v', 'libx264',
+                '-preset', 'veryfast',
+                '-movflags', '+faststart',
+                '-pix_fmt', 'yuv420p',
+                output_video_path
+            ],
+            check=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True
+        )
+
+        audio_proc = subprocess.run(
+            [
+                ffmpeg_path, '-y',
+                '-i', input_path,
+                '-vn',
+                '-c:a', 'libmp3lame',
+                '-b:a', '128k',
+                output_audio_path
+            ],
+            check=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True
+        )
+
+        with open(output_video_path, 'rb') as f:
+            video_bytes = f.read()
+        with open(output_audio_path, 'rb') as f:
+            audio_bytes = f.read()
+
+        base_key = f'stream:{session_id}:chunk:{chunk_label}'
+        r.setex(f'{base_key}:video:mp4', 3600, video_bytes)
+        r.setex(f'{base_key}:audio:mp3', 3600, audio_bytes)
+
+        meta = {
+            'timestamp': timestamp,
+            'chunkIndex': chunk_label,
+            'mimeType': mime_type,
+            'durationMs': duration_ms
+        }
+        r.setex(f'{base_key}:meta', 3600, json.dumps(meta))
+        r.rpush(f'stream:{session_id}:chunks', chunk_label)
+        r.expire(f'stream:{session_id}:chunks', 3600)
+
         r.setex(f'stream:{session_id}:last_chunk', 60, timestamp)
-        
-        chunk_count = r.llen(chunk_key)
-        logger.info(f'✅ Stored video chunk for session {session_id} - chunk #{result}, total: {chunk_count}')
+        chunk_count = r.llen(f'stream:{session_id}:chunks')
+        logger.info(
+            f'✅ Stored mp4/mp3 chunk for session {session_id} - chunk #{chunk_label}, '
+            f'durationMs={duration_ms}, total: {chunk_count}'
+        )
+    except subprocess.CalledProcessError as e:
+        stderr = ''
+        if e.stderr:
+            stderr = e.stderr.strip()
+        logger.error(f'❌ ffmpeg failed to convert chunk to mp4/mp3: {stderr or "no stderr"}')
     except Exception as e:
-        logger.error(f'❌ Error storing video chunk: {e}')
+        logger.error(f'❌ Error processing video chunk: {e}')
+    finally:
+        for path in (input_path, output_video_path, output_audio_path):
+            try:
+                if os.path.exists(path):
+                    os.remove(path)
+            except Exception:
+                pass
 
 
 @socketio.on('test_redis')

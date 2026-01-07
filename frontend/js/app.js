@@ -17,6 +17,10 @@ class VideoApp {
         this.socket = null;
         this.socketConnected = false;
         this.mediaConstraints = { video: true, audio: true };
+        this.chunkDurationMs = 30000;
+        this.chunkIndex = 0;
+        this.chunkTimer = null;
+        this.isRecording = false;
         this.initializeWebSocket();
         this.initializeEventListeners();
     }
@@ -28,7 +32,7 @@ class VideoApp {
             ? (port === '3000' ? '5555' : (port || '5000'))
             : (port || '5555');
         this.socket = io(`${protocol}//${hostname}:${backendPort}`, {
-            transports: ['websocket', 'polling'],
+            transports: ['websocket'],
             reconnection: true,
             reconnectionDelay: 1000,
             reconnectionAttempts: 5
@@ -86,6 +90,7 @@ class VideoApp {
             
             // Generate session ID
             this.sessionId = `stream_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+            this.chunkIndex = 0;
             
             // Start recording after a short delay
             setTimeout(() => {
@@ -135,48 +140,71 @@ class VideoApp {
         }
         
         try {
-            const recorderOptions = { mimeType };
-            if (mimeType.startsWith('video/webm')) {
-                recorderOptions.videoBitsPerSecond = 2500000;
-            }
-            
-            this.mediaRecorder = new MediaRecorder(this.localStream, recorderOptions);
-            
-            this.mediaRecorder.ondataavailable = (event) => {
-                if (event.data && event.data.size > 0) {
-                    const reader = new FileReader();
-                    reader.onloadend = () => {
-                        const base64data = reader.result.split(',')[1];
-                        this.sendWebSocketMessage('video_chunk', {
-                            sessionId: this.sessionId,
-                            chunk: base64data,
-                            timestamp: Date.now()
-                        });
-                    };
-                    reader.onerror = () => console.error('FileReader error');
-                    reader.readAsDataURL(event.data);
-                }
-            };
-            
-            this.mediaRecorder.onerror = (event) => {
-                console.error('MediaRecorder error:', event.error);
-            };
-            
-            this.mediaRecorder.onstop = () => {
-                console.log('MediaRecorder stopped');
-            };
-            
-            // Start recording and send chunks every 20 seconds
-            this.mediaRecorder.start(20000);
-            console.log('MediaRecorder started with MIME type:', mimeType);
+            this.isRecording = true;
+            this.startRecorderCycle(mimeType);
         } catch (error) {
             console.error('Failed to start MediaRecorder:', error);
             alert('Failed to start video recording: ' + error.message);
         }
     }
 
+    startRecorderCycle(mimeType) {
+        if (!this.isRecording || !this.localStream) return;
+
+        const recorderOptions = { mimeType };
+        if (mimeType.startsWith('video/webm')) {
+            recorderOptions.videoBitsPerSecond = 2500000;
+        }
+
+        this.mediaRecorder = new MediaRecorder(this.localStream, recorderOptions);
+
+        this.mediaRecorder.ondataavailable = (event) => {
+            if (event.data && event.data.size > 0) {
+                const reader = new FileReader();
+                reader.onloadend = () => {
+                    const sizeKb = Math.round(event.data.size / 1024);
+                    console.log(`📦 Chunk ${this.chunkIndex} ready (${sizeKb} KB)`);
+                    this.sendWebSocketMessage('video_chunk', {
+                        sessionId: this.sessionId,
+                        chunk: reader.result,
+                        timestamp: Date.now(),
+                        chunkIndex: this.chunkIndex++,
+                        mimeType,
+                        durationMs: this.chunkDurationMs
+                    });
+                };
+                reader.onerror = () => console.error('FileReader error');
+                reader.readAsArrayBuffer(event.data);
+            }
+        };
+
+        this.mediaRecorder.onerror = (event) => {
+            console.error('MediaRecorder error:', event.error);
+        };
+
+        this.mediaRecorder.onstop = () => {
+            console.log('MediaRecorder stopped');
+            if (this.isRecording) {
+                this.startRecorderCycle(mimeType);
+            }
+        };
+
+        this.mediaRecorder.start();
+        console.log('MediaRecorder started with MIME type:', mimeType);
+        this.chunkTimer = setTimeout(() => {
+            if (this.mediaRecorder && this.mediaRecorder.state === 'recording') {
+                this.mediaRecorder.stop();
+            }
+        }, this.chunkDurationMs);
+    }
+
     stopCamera() {
         console.log('🛑 Stopping camera...');
+        this.isRecording = false;
+        if (this.chunkTimer) {
+            clearTimeout(this.chunkTimer);
+            this.chunkTimer = null;
+        }
         
         // Stop MediaRecorder
         if (this.mediaRecorder && this.mediaRecorder.state !== 'inactive') {

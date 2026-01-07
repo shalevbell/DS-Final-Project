@@ -4,6 +4,7 @@ WORKDIR /app
 
 # Install system dependencies (minimal for now, add build tools later when needed for ML libs)
 RUN apt-get update && apt-get install -y \
+    ffmpeg \
     postgresql-client \
     && rm -rf /var/lib/apt/lists/*
 
