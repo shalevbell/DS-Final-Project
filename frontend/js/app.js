@@ -17,10 +17,10 @@ class VideoApp {
         this.socket = null;
         this.socketConnected = false;
         this.mediaConstraints = { video: true, audio: true };
-        this.chunkDurationMs = 30000;
         this.chunkIndex = 0;
         this.chunkTimer = null;
         this.isRecording = false;
+        this.chunkDurationMs = 30000;  // Default, will be overridden by backend
         this.initializeWebSocket();
         this.initializeEventListeners();
     }
@@ -39,23 +39,21 @@ class VideoApp {
         });
         this.socket.on('connect', () => {
             this.socketConnected = true;
-            console.log('✅ WebSocket connected');
+            console.log('WebSocket connected');
             this.socket.emit('request_camera_permission');
         });
         this.socket.on('disconnect', () => {
             this.socketConnected = false;
-            console.log('❌ WebSocket disconnected');
+            console.log('WebSocket disconnected');
         });
         this.socket.on('connect_error', (error) => {
             this.socketConnected = false;
-            console.error('❌ WebSocket connection error:', error);
+            console.error('WebSocket connection error:', error);
         });
-        this.socket.on('redis_test_result', (data) => {
-            console.log('📊 Redis test result:', data);
-            if (data.status === 'success') {
-                console.log('✅ Redis connection is working!');
-            } else {
-                console.error('❌ Redis connection failed:', data.message);
+        this.socket.on('stream_acknowledged', (data) => {
+            if (data.chunkDurationMs) {
+                this.chunkDurationMs = data.chunkDurationMs;
+                console.log(`Chunk duration set to ${this.chunkDurationMs}ms by backend`);
             }
         });
     }
@@ -76,27 +74,25 @@ class VideoApp {
             if (!navigator.mediaDevices?.getUserMedia) {
                 throw new Error('getUserMedia is not supported');
             }
-            
-            console.log('Requesting camera access...');
+
             this.localStream = await navigator.mediaDevices.getUserMedia(this.mediaConstraints);
-            console.log('Camera access granted');
-            
+
             this.videoElement.srcObject = this.localStream;
             this.videoElement.play().catch(err => console.error('Video play error:', err));
-            
+
             this.updateConnectionStatus(true);
             this.startButton.disabled = true;
             this.stopButton.disabled = false;
-            
+
             // Generate session ID
             this.sessionId = `stream_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
             this.chunkIndex = 0;
-            
+
             // Start recording after a short delay
             setTimeout(() => {
                 this.startRecording();
             }, 1000);
-            
+
             const tracks = this.localStream.getTracks();
             this.sendWebSocketMessage('stream_ready', {
                 sessionId: this.sessionId,
@@ -104,6 +100,8 @@ class VideoApp {
                 video: tracks.some(t => t.kind === 'video'),
                 audio: tracks.some(t => t.kind === 'audio')
             });
+
+            console.log('Camera started:', this.sessionId);
         } catch (error) {
             console.error('Camera start error:', error);
             this.handleError(error);
@@ -112,10 +110,10 @@ class VideoApp {
     
     startRecording() {
         if (!this.localStream) {
-            console.warn('Stream not available for recording');
+            console.warn('Stream not available');
             return;
         }
-        
+
         // Find supported MIME type
         const options = [
             'video/webm;codecs=vp9,opus',
@@ -125,7 +123,7 @@ class VideoApp {
             'video/webm',
             'video/mp4'
         ];
-        
+
         let mimeType = '';
         for (const option of options) {
             if (MediaRecorder.isTypeSupported(option)) {
@@ -133,19 +131,14 @@ class VideoApp {
                 break;
             }
         }
-        
+
         if (!mimeType) {
-            console.warn('No supported MIME type found for MediaRecorder');
+            console.error('No supported MIME type found');
             return;
         }
-        
-        try {
-            this.isRecording = true;
-            this.startRecorderCycle(mimeType);
-        } catch (error) {
-            console.error('Failed to start MediaRecorder:', error);
-            alert('Failed to start video recording: ' + error.message);
-        }
+
+        this.isRecording = true;
+        this.startRecorderCycle(mimeType);
     }
 
     startRecorderCycle(mimeType) {
@@ -163,7 +156,7 @@ class VideoApp {
                 const reader = new FileReader();
                 reader.onloadend = () => {
                     const sizeKb = Math.round(event.data.size / 1024);
-                    console.log(`📦 Chunk ${this.chunkIndex} ready (${sizeKb} KB)`);
+                    console.log(`Chunk ${this.chunkIndex} uploaded (${sizeKb} KB)`);
                     this.sendWebSocketMessage('video_chunk', {
                         sessionId: this.sessionId,
                         chunk: reader.result,
@@ -183,14 +176,12 @@ class VideoApp {
         };
 
         this.mediaRecorder.onstop = () => {
-            console.log('MediaRecorder stopped');
             if (this.isRecording) {
                 this.startRecorderCycle(mimeType);
             }
         };
 
         this.mediaRecorder.start();
-        console.log('MediaRecorder started with MIME type:', mimeType);
         this.chunkTimer = setTimeout(() => {
             if (this.mediaRecorder && this.mediaRecorder.state === 'recording') {
                 this.mediaRecorder.stop();
@@ -199,41 +190,29 @@ class VideoApp {
     }
 
     stopCamera() {
-        console.log('🛑 Stopping camera...');
         this.isRecording = false;
+
         if (this.chunkTimer) {
             clearTimeout(this.chunkTimer);
             this.chunkTimer = null;
         }
-        
-        // Stop MediaRecorder
+
         if (this.mediaRecorder && this.mediaRecorder.state !== 'inactive') {
             this.mediaRecorder.stop();
             this.mediaRecorder = null;
-            console.log('✅ MediaRecorder stopped');
         }
-        
+
         if (this.localStream) {
             this.localStream.getTracks().forEach(track => track.stop());
             this.videoElement.srcObject = null;
             this.localStream = null;
-            console.log('✅ Stream tracks stopped');
-            
-            // Test Redis connection via server
-            if (this.sessionId) {
-                console.log(`📡 Testing Redis connection for session: ${this.sessionId}`);
-                this.sendWebSocketMessage('test_redis', {
-                    sessionId: this.sessionId
-                });
-                this.sessionId = null;
-            }
-            
-            this.sendWebSocketMessage('camera_status', { status: 'stopped' });
+            this.sessionId = null;
         }
+
         this.updateConnectionStatus(false);
         this.startButton.disabled = false;
         this.stopButton.disabled = true;
-        console.log('✅ Camera stopped');
+        console.log('Camera stopped');
     }
     
 

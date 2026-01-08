@@ -47,6 +47,9 @@ socketio = SocketIO(
     max_http_buffer_size=100 * 1024 * 1024
 )
 
+# Configuration
+CHUNK_DURATION_MS = 30000  # Video chunk duration in milliseconds (default: 30 seconds)
+
 # Initialize Redis connection (lazy - will connect when needed)
 redis_client = None
 TMP_DIR = os.path.join(os.path.dirname(__file__), 'tmp')
@@ -59,9 +62,9 @@ def get_redis():
         try:
             redis_client = redis.from_url(Config.REDIS_URL, decode_responses=False)
             redis_client.ping()
-            logger.info('✅ Redis connected')
+            logger.info('Redis connected')
         except Exception as e:
-            logger.error(f'❌ Redis connection failed: {e}')
+            logger.error(f'Redis connection failed: {e}')
             redis_client = None
     return redis_client
 
@@ -142,24 +145,16 @@ def handle_disconnect():
 
 
 @socketio.on('request_camera_permission')
-def handle_camera_permission_request(data=None):
-    logger.info('Camera permission requested')
+def handle_camera_permission_request():
     emit('camera_permission_requested', {'status': 'requested', 'message': 'Please grant camera and microphone permissions'})
-
-
-@socketio.on('camera_status')
-def handle_camera_status(data):
-    if isinstance(data, dict):
-        logger.info(f'Camera status: {data.get("status", "unknown")}')
-        emit('camera_status_ack', {'status': 'received', 'data': data})
 
 
 @socketio.on('stream_ready')
 def handle_stream_ready(data):
     if isinstance(data, dict):
         session_id = data.get('sessionId')
-        logger.info(f'Stream ready: session={session_id}, video={data.get("video")}, audio={data.get("audio")}')
-        
+        logger.info(f'Stream ready: {session_id}')
+
         # Initialize stream storage in Redis
         if session_id:
             r = get_redis()
@@ -172,18 +167,21 @@ def handle_stream_ready(data):
                         'audio': data.get('audio'),
                         'status': 'active'
                     }
-                    r.setex(f'stream:{session_id}:metadata', 3600, json.dumps(metadata))
-                    logger.info(f'✅ Stream metadata stored for session {session_id}')
+                    r.setex(f'session:{session_id}:info', 3600, json.dumps(metadata))
                 except Exception as e:
-                    logger.error(f'❌ Error storing metadata: {e}')
-        
-        emit('stream_acknowledged', {'status': 'ready', 'sessionId': session_id})
+                    logger.error(f'Error storing metadata: {e}')
+
+        emit('stream_acknowledged', {
+            'status': 'ready',
+            'sessionId': session_id,
+            'chunkDurationMs': CHUNK_DURATION_MS
+        })
 
 
 @socketio.on('camera_error')
 def handle_camera_error(data):
     if isinstance(data, dict):
-        logger.error(f'Camera error: {data.get("error", "Unknown")} - {data.get("message", "")}')
+        logger.error(f'Camera error: {data.get("error", "Unknown")}')
 
 
 @socketio.on('video_chunk')
@@ -191,163 +189,116 @@ def handle_video_chunk(data):
     """Handle video chunk from client and store in Redis."""
     if not isinstance(data, dict):
         return
-    
+
     session_id = data.get('sessionId')
     chunk_data = data.get('chunk')
     timestamp = data.get('timestamp', int(time.time()))
     chunk_index = data.get('chunkIndex')
     mime_type = data.get('mimeType')
     duration_ms = data.get('durationMs')
-    
+
     if not session_id or not chunk_data:
-        logger.warning('Invalid video chunk data received')
-        return
-    
-    r = get_redis()
-    if not r:
-        logger.error('❌ Redis not available, cannot store chunk')
-        return
-    
-    ffmpeg_path = shutil.which('ffmpeg')
-    if not ffmpeg_path:
-        logger.error('❌ ffmpeg not available, cannot convert chunk to mp4/mp3')
+        logger.warning('Invalid chunk data')
         return
 
-    input_bytes = None
-    if isinstance(chunk_data, (bytes, bytearray, memoryview)):
+    r = get_redis()
+    if not r:
+        logger.error('Redis not available')
+        return
+
+    ffmpeg_path = shutil.which('ffmpeg')
+    if not ffmpeg_path:
+        logger.error('ffmpeg not available')
+        return
+
+    # Handle chunk data - Socket.IO sends ArrayBuffer as dict/list
+    if isinstance(chunk_data, bytes):
+        input_bytes = chunk_data
+    elif isinstance(chunk_data, (list, bytearray)):
         input_bytes = bytes(chunk_data)
-    elif isinstance(chunk_data, list):
-        input_bytes = bytes(chunk_data)
-    elif isinstance(chunk_data, dict) and isinstance(chunk_data.get('data'), list):
-        input_bytes = bytes(chunk_data['data'])
-    else:
-        if isinstance(chunk_data, bytes):
-            chunk_data = chunk_data.decode('utf-8', errors='ignore')
-        if isinstance(chunk_data, str):
-            chunk_data = chunk_data.strip()
-            # Fix missing base64 padding from some browsers.
-            padding = len(chunk_data) % 4
-            if padding:
-                chunk_data += '=' * (4 - padding)
+    elif isinstance(chunk_data, dict):
+        # Socket.IO might wrap ArrayBuffer in {'data': [...], 'type': 'Buffer'}
+        if 'data' in chunk_data:
+            input_bytes = bytes(chunk_data['data'])
+        else:
+            logger.error(f'Unexpected dict format: {list(chunk_data.keys())}')
+            return
+    elif isinstance(chunk_data, str):
+        # Legacy base64 support
         try:
             input_bytes = base64.b64decode(chunk_data)
         except Exception as e:
-            logger.error(f'❌ Failed to decode chunk base64: {e}')
+            logger.error(f'Failed to decode base64: {e}')
             return
+    else:
+        logger.error(f'Unexpected chunk data type: {type(chunk_data).__name__}')
+        return
 
     chunk_label = chunk_index if chunk_index is not None else int(timestamp)
-    input_path = os.path.join(TMP_DIR, f'{session_id}_{chunk_label}.webm')
-    output_video_path = os.path.join(TMP_DIR, f'{session_id}_{chunk_label}.mp4')
-    output_audio_path = os.path.join(TMP_DIR, f'{session_id}_{chunk_label}.mp3')
+    logger.info(f'Processing chunk {chunk_label}, size: {len(input_bytes)} bytes')
 
     try:
-        with open(input_path, 'wb') as f:
-            f.write(input_bytes)
-
+        # Convert video using ffmpeg pipes (no temp files)
+        # Use fragmented MP4 for pipe compatibility
         video_proc = subprocess.run(
             [
-                ffmpeg_path, '-y',
-                '-i', input_path,
-                '-c:v', 'libx264',
-                '-preset', 'veryfast',
-                '-movflags', '+faststart',
+                ffmpeg_path, '-hide_banner', '-loglevel', 'error',
+                '-i', 'pipe:0',
+                '-c:v', 'libx264', '-preset', 'veryfast',
                 '-pix_fmt', 'yuv420p',
-                output_video_path
+                '-movflags', 'frag_keyframe+empty_moov+default_base_moof',
+                '-f', 'mp4', 'pipe:1'
             ],
-            check=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True
+            input=input_bytes,
+            capture_output=True,
+            check=True
         )
+        video_bytes = video_proc.stdout
 
+        # Convert audio using ffmpeg pipes (no temp files)
         audio_proc = subprocess.run(
             [
-                ffmpeg_path, '-y',
-                '-i', input_path,
-                '-vn',
-                '-c:a', 'libmp3lame',
-                '-b:a', '128k',
-                output_audio_path
+                ffmpeg_path, '-hide_banner', '-loglevel', 'error',
+                '-i', 'pipe:0',
+                '-vn',  # No video
+                '-map', '0:a:0',  # Map first audio stream
+                '-c:a', 'libmp3lame',  # MP3 codec
+                '-b:a', '128k',  # Bitrate
+                '-ar', '44100',  # Standard sample rate
+                '-ac', '2',  # Stereo (2 channels)
+                '-f', 'mp3', 'pipe:1'
             ],
-            check=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True
+            input=input_bytes,
+            capture_output=True,
+            check=True
         )
+        audio_bytes = audio_proc.stdout
 
-        with open(output_video_path, 'rb') as f:
-            video_bytes = f.read()
-        with open(output_audio_path, 'rb') as f:
-            audio_bytes = f.read()
-
-        base_key = f'stream:{session_id}:chunk:{chunk_label}'
-        r.setex(f'{base_key}:video:mp4', 3600, video_bytes)
-        r.setex(f'{base_key}:audio:mp3', 3600, audio_bytes)
-
+        # Store in Redis using pipeline for efficiency
         meta = {
             'timestamp': timestamp,
             'chunkIndex': chunk_label,
             'mimeType': mime_type,
             'durationMs': duration_ms
         }
-        r.setex(f'{base_key}:meta', 3600, json.dumps(meta))
-        r.rpush(f'stream:{session_id}:chunks', chunk_label)
-        r.expire(f'stream:{session_id}:chunks', 3600)
+        
+        # REDIS SET
+        pipe = r.pipeline()
+        pipe.setex(f'session:{session_id}:chunk:{chunk_label}:video', 3600, video_bytes)
+        pipe.setex(f'session:{session_id}:chunk:{chunk_label}:audio', 3600, audio_bytes)
+        pipe.setex(f'session:{session_id}:chunk:{chunk_label}:meta', 3600, json.dumps(meta))
+        pipe.rpush(f'session:{session_id}:chunks', chunk_label)
+        pipe.expire(f'session:{session_id}:chunks', 3600)
+        pipe.execute()
 
-        r.setex(f'stream:{session_id}:last_chunk', 60, timestamp)
-        chunk_count = r.llen(f'stream:{session_id}:chunks')
-        logger.info(
-            f'✅ Stored mp4/mp3 chunk for session {session_id} - chunk #{chunk_label}, '
-            f'durationMs={duration_ms}, total: {chunk_count}'
-        )
+        chunk_count = r.llen(f'session:{session_id}:chunks')
+        logger.info(f'Stored chunk {chunk_label} for session {session_id} (total: {chunk_count})')
+
     except subprocess.CalledProcessError as e:
-        stderr = ''
-        if e.stderr:
-            stderr = e.stderr.strip()
-        logger.error(f'❌ ffmpeg failed to convert chunk to mp4/mp3: {stderr or "no stderr"}')
+        stderr_output = e.stderr.decode('utf-8', errors='ignore') if e.stderr else 'no error output'
+        logger.error(f'ffmpeg failed (code {e.returncode}): {stderr_output[:200]}')
     except Exception as e:
-        logger.error(f'❌ Error processing video chunk: {e}')
-    finally:
-        for path in (input_path, output_video_path, output_audio_path):
-            try:
-                if os.path.exists(path):
-                    os.remove(path)
-            except Exception:
-                pass
-
-
-@socketio.on('test_redis')
-def handle_test_redis(data):
-    """Test Redis connection."""
-    logger.info('🧪 Testing Redis connection...')
-    
-    try:
-        r = get_redis()
-        if r:
-            # Test basic operations
-            test_key = 'test:connection'
-            r.setex(test_key, 10, 'test_value')
-            value = r.get(test_key)
-            r.delete(test_key)
-            
-            logger.info('✅ Redis connection test successful!')
-            emit('redis_test_result', {
-                'status': 'success',
-                'message': 'Redis connection working',
-                'test_value': value.decode() if isinstance(value, bytes) else value
-            })
-        else:
-            logger.error('❌ Redis connection test failed - client is None')
-            emit('redis_test_result', {
-                'status': 'failed',
-                'message': 'Redis client not available'
-            })
-    except Exception as e:
-        logger.error(f'❌ Redis connection test error: {e}')
-        emit('redis_test_result', {
-            'status': 'error',
-            'message': str(e)
-        })
+        logger.error(f'Error processing chunk: {e}')
 
 
 if __name__ == '__main__':

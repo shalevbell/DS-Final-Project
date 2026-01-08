@@ -2,17 +2,23 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
-# Install system dependencies (minimal for now, add build tools later when needed for ML libs)
-RUN apt-get update && apt-get install -y \
+# Install system dependencies with BuildKit cache mount for apt
+# Using multiple mirrors and --no-install-recommends for faster downloads
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt,sharing=locked \
+    apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg \
     postgresql-client \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy requirements and install Python dependencies
+# Copy requirements first (better layer caching - changes less frequently than code)
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy application code
+# Install Python dependencies with BuildKit cache mount for pip
+RUN --mount=type=cache,target=/root/.cache/pip \
+    pip install --no-cache-dir -r requirements.txt
+
+# Copy application code (this layer changes most frequently)
 COPY . .
 
 # Expose port
