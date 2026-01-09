@@ -152,6 +152,37 @@ body {
     box-shadow: 0 4px 8px rgba(239, 68, 68, 0.3);
 }
 
+/* Permission Info */
+.permission-info {
+    margin-top: 15px;
+    padding: 12px;
+    background-color: #f0f4f8;
+    border-left: 4px solid #667eea;
+    border-radius: 6px;
+    font-size: 13px;
+}
+
+.permission-info.hidden {
+    display: none;
+}
+
+.permission-info .info-text {
+    margin: 0;
+    color: #4a5568;
+    line-height: 1.6;
+}
+
+.permission-info .info-text strong {
+    color: #667eea;
+}
+
+.permission-info .info-text small {
+    display: block;
+    margin-top: 8px;
+    color: #718096;
+    font-size: 11px;
+}
+
 /* Responsive Design */
 @media (max-width: 768px) {
     .container {

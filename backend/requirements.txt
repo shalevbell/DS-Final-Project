@@ -1,5 +1,8 @@
 Flask==3.0.0
 Flask-CORS==4.0.0
+Flask-SocketIO==5.3.6
+python-socketio==5.10.0
+eventlet==0.33.3
 psycopg2-binary==2.9.9
 redis==5.0.1
 python-dotenv==1.0.0
