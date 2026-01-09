@@ -5,12 +5,16 @@ import json
 import base64
 import shutil
 import subprocess
+import signal
+import sys
 from flask import Flask, jsonify, send_from_directory
 from flask_cors import CORS
 from flask_socketio import SocketIO, emit
 import psycopg2
 import redis
+import eventlet
 from config import Config
+from chunk_processor import ChunkProcessor
 
 # Configure logging
 logging.basicConfig(
@@ -54,6 +58,37 @@ CHUNK_DURATION_MS = 30000  # Video chunk duration in milliseconds (default: 30 s
 redis_client = None
 TMP_DIR = os.path.join(os.path.dirname(__file__), 'tmp')
 os.makedirs(TMP_DIR, exist_ok=True)
+
+# Initialize chunk processor (will be started in background)
+chunk_processor = None
+
+
+def init_chunk_processor():
+    """Initialize and start background chunk processor."""
+    global chunk_processor
+    if chunk_processor is None:
+        chunk_processor = ChunkProcessor(
+            redis_url=Config.REDIS_URL,
+            max_workers=Config.PROCESSING_MAX_WORKERS,
+            queue_size=Config.PROCESSING_QUEUE_SIZE,
+            pubsub_channel=Config.PUBSUB_CHANNEL,
+            reconnect_delay=Config.PUBSUB_RECONNECT_DELAY
+        )
+        chunk_processor.start()
+        logger.info('Chunk processor started in background thread')
+
+
+def shutdown_handler(_signum, _frame):
+    """Handle graceful shutdown."""
+    logger.info('Shutting down gracefully...')
+    if chunk_processor:
+        chunk_processor.shutdown()
+    sys.exit(0)
+
+
+# Register signal handlers for graceful shutdown
+signal.signal(signal.SIGINT, shutdown_handler)
+signal.signal(signal.SIGTERM, shutdown_handler)
 
 def get_redis():
     """Get Redis client, connecting if needed."""
@@ -118,6 +153,25 @@ def health_check():
     return jsonify(response), status_code
 
 
+@app.route('/api/health/processing', methods=['GET'])
+def processing_health():
+    """Return processing queue statistics."""
+    if chunk_processor:
+        stats = chunk_processor.get_stats()
+        return jsonify({
+            'status': 'running',
+            'queue_size': stats['queue_size'],
+            'in_progress': stats['in_progress'],
+            'completed_total': stats['completed_total'],
+            'failed_total': stats['failed_total'],
+            'workers': stats['workers'],
+            'chunks_received': stats['chunks_received'],
+            'chunks_processed': stats['chunks_processed'],
+            'avg_processing_time_ms': stats['avg_processing_time_ms']
+        }), 200
+    return jsonify({'error': 'Processor not initialized'}), 503
+
+
 @app.route('/')
 def index():
     """Serve the frontend index.html."""
@@ -133,8 +187,14 @@ def serve_frontend(path):
 # WebSocket event handlers
 @socketio.on('connect')
 def handle_connect():
-    """Handle client connection."""
+    """Handle client connection and ensure processor is started."""
     logger.info('Client connected')
+
+    # Ensure chunk processor is started (for gunicorn deployment)
+    global chunk_processor
+    if chunk_processor is None:
+        eventlet.spawn_n(init_chunk_processor)
+
     emit('connected', {'status': 'connected', 'message': 'WebSocket connection established'})
 
 
@@ -287,12 +347,24 @@ def handle_video_chunk(data):
         pipe.setex(f'session:{session_id}:chunk:{chunk_label}:video', 3600, video_bytes)
         pipe.setex(f'session:{session_id}:chunk:{chunk_label}:audio', 3600, audio_bytes)
         pipe.setex(f'session:{session_id}:chunk:{chunk_label}:meta', 3600, json.dumps(meta))
+        pipe.setex(f'session:{session_id}:chunk:{chunk_label}:status', 3600, 'pending')
         pipe.rpush(f'session:{session_id}:chunks', chunk_label)
         pipe.expire(f'session:{session_id}:chunks', 3600)
         pipe.execute()
 
         chunk_count = r.llen(f'session:{session_id}:chunks')
         logger.info(f'Stored chunk {chunk_label} for session {session_id} (total: {chunk_count})')
+
+        # Publish PUBSUB notification for chunk processor
+        notification = {
+            'sessionId': session_id,
+            'chunkIndex': chunk_label,
+            'timestamp': timestamp,
+            'videoSize': len(video_bytes),
+            'audioSize': len(audio_bytes)
+        }
+        r.publish(Config.PUBSUB_CHANNEL, json.dumps(notification))
+        logger.info(f'Published chunk notification: {session_id}:{chunk_label}')
 
     except subprocess.CalledProcessError as e:
         stderr_output = e.stderr.decode('utf-8', errors='ignore') if e.stderr else 'no error output'
@@ -302,5 +374,8 @@ def handle_video_chunk(data):
 
 
 if __name__ == '__main__':
+    # Start chunk processor in background greenthread (for direct python execution)
+    eventlet.spawn(init_chunk_processor)
+
     logger.info(f"Starting Flask app with SocketIO on port 5000 (ENV: {Config.FLASK_ENV})")
     socketio.run(app, host='0.0.0.0', port=5000, debug=Config.DEBUG)

@@ -24,3 +24,13 @@ class Config:
 
     # CORS configuration
     CORS_ORIGINS = '*'
+
+    # Chunk processing configuration
+    PROCESSING_MAX_WORKERS = int(os.getenv('PROCESSING_MAX_WORKERS', '3'))
+    PROCESSING_QUEUE_SIZE = int(os.getenv('PROCESSING_QUEUE_SIZE', '100'))
+    PROCESSING_RETRY_ATTEMPTS = int(os.getenv('PROCESSING_RETRY_ATTEMPTS', '3'))
+    PROCESSING_RETRY_DELAY = int(os.getenv('PROCESSING_RETRY_DELAY', '5'))  # seconds
+
+    # PUBSUB configuration
+    PUBSUB_CHANNEL = os.getenv('PUBSUB_CHANNEL', 'chunks:ready')
+    PUBSUB_RECONNECT_DELAY = int(os.getenv('PUBSUB_RECONNECT_DELAY', '5'))  # seconds
