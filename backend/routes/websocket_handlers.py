@@ -102,7 +102,12 @@ def register_socketio_handlers(socketio: SocketIO, config: Config):
         duration_ms = data.get('durationMs')
 
         if not session_id or not chunk_data:
-            logger.warning('Invalid chunk data')
+            logger.warning(
+                f'Invalid chunk data: sessionId={session_id}, '
+                f'has_chunk={bool(chunk_data)}, '
+                f'chunk_size={len(chunk_data) if chunk_data else 0}, '
+                f'chunkIndex={chunk_index}'
+            )
             return
 
         r = get_redis_client()
