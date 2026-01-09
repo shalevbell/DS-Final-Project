@@ -240,7 +240,7 @@ def run_parallel_analysis(
     audio_bytes: bytes,
     session_id: str,
     chunk_index: int,
-    max_workers: int = 3,
+    max_workers: int = None,
     timeout: int = 60
 ) -> Dict:
     """
@@ -253,7 +253,7 @@ def run_parallel_analysis(
         audio_bytes: MP3 audio data
         session_id: Session identifier
         chunk_index: Chunk index within session
-        max_workers: Maximum parallel workers (default: 3, one per function)
+        max_workers: Maximum parallel workers (default: None = auto-scale to model count)
         timeout: Timeout in seconds per function (default: 60)
 
     Returns:
@@ -270,6 +270,11 @@ def run_parallel_analysis(
     logger.info(f'Running parallel analysis for chunk {session_id}:{chunk_index}')
 
     results = {}
+
+    # Auto-scale max_workers to match number of models
+    if max_workers is None:
+        max_workers = len(MODEL_REGISTRY)
+        logger.debug(f'Auto-scaled max_workers to {max_workers} (matches model count)')
 
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         # Dynamically build futures from MODEL_REGISTRY

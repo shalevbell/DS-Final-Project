@@ -123,7 +123,9 @@ Frontend (WebRTC)
    }
    ```
 
-That's it! The system will automatically process it for all chunks.
+That's it! The system will automatically:
+- Process your new model for all chunks
+- Run it in parallel with other models (auto-scales worker count)
 
 ## Environment Variables
 
