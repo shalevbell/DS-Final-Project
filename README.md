@@ -66,7 +66,7 @@ Frontend (WebRTC)
 │       └── app.js         # WebRTC + WebSocket logic
 │
 ├── backend/               # Flask application
-│   ├── app.py             # Main entry point (74 lines)
+│   ├── app.py             # Main entry point
 │   ├── config.py          # Configuration
 │   │
 │   ├── routes/            # HTTP & WebSocket handlers
