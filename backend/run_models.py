@@ -309,9 +309,10 @@ def run_parallel_analysis(
 
     # Calculate success count
     success_count = sum(1 for r in results.values() if isinstance(r, dict) and 'error' not in r)
+    total_models = len(MODEL_REGISTRY)
     logger.info(
         f'Parallel analysis complete for chunk {session_id}:{chunk_index}: '
-        f'{success_count}/3 succeeded in {total_time}ms'
+        f'{success_count}/{total_models} succeeded in {total_time}ms'
     )
 
     return results
