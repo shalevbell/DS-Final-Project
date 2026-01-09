@@ -1,11 +1,10 @@
 """
 Redis helper utilities for chunk processing.
 
-Provides key formatting, connection management, and common Redis operations.
+Provides key formatting utilities for consistent Redis key generation.
 """
 
 import logging
-from typing import Optional
 
 logger = logging.getLogger(__name__)
 
@@ -87,65 +86,3 @@ def get_session_chunks_key(session_id: str) -> str:
 def get_session_info_key(session_id: str) -> str:
     """Get Redis key for session metadata."""
     return format_session_key(session_id, 'info')
-
-
-class RedisConnectionManager:
-    """
-    Manages Redis connections with error handling and reconnection logic.
-    """
-
-    def __init__(self, redis_url: str):
-        """
-        Initialize Redis connection manager.
-
-        Args:
-            redis_url: Redis connection URL
-        """
-        self.redis_url = redis_url
-        self.client: Optional[any] = None
-
-    def connect(self, decode_responses: bool = False):
-        """
-        Create Redis client connection.
-
-        Args:
-            decode_responses: Whether to decode responses to strings (default: False for binary data)
-
-        Returns:
-            Redis client instance
-
-        Raises:
-            Exception if connection fails
-        """
-        import redis
-
-        try:
-            self.client = redis.from_url(self.redis_url, decode_responses=decode_responses)
-            self.client.ping()
-            logger.info(f'Redis connected: {self.redis_url}')
-            return self.client
-        except Exception as e:
-            logger.error(f'Redis connection failed: {e}')
-            raise
-
-    def get_client(self):
-        """
-        Get Redis client, connecting if necessary.
-
-        Returns:
-            Redis client instance
-        """
-        if self.client is None:
-            self.connect()
-        return self.client
-
-    def close(self):
-        """Close Redis connection."""
-        if self.client:
-            try:
-                self.client.close()
-                logger.info('Redis connection closed')
-            except Exception as e:
-                logger.warning(f'Error closing Redis connection: {e}')
-            finally:
-                self.client = None

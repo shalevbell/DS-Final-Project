@@ -27,10 +27,8 @@ class VideoApp {
 
     initializeWebSocket() {
         if (typeof io === 'undefined') return;
-        const { protocol, hostname, port } = window.location;
-        const backendPort = (hostname === 'localhost' || hostname === '127.0.0.1') 
-            ? (port === '3000' ? '5555' : (port || '5000'))
-            : (port || '5555');
+        const { protocol, hostname } = window.location;
+        const backendPort = '5555';  // Backend runs on port 5555
         this.socket = io(`${protocol}//${hostname}:${backendPort}`, {
             transports: ['websocket'],
             reconnection: true,

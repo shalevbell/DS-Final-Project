@@ -34,3 +34,6 @@ class Config:
     # PUBSUB configuration
     PUBSUB_CHANNEL = os.getenv('PUBSUB_CHANNEL', 'chunks:ready')
     PUBSUB_RECONNECT_DELAY = int(os.getenv('PUBSUB_RECONNECT_DELAY', '5'))  # seconds
+
+    # Chunk configuration
+    CHUNK_DURATION_MS = 30000  # Video chunk duration in milliseconds (30 seconds)

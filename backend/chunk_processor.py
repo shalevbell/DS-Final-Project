@@ -15,7 +15,7 @@ import redis
 import eventlet
 
 from processing_queue import ProcessingQueue
-from backend.run_models import run_parallel_analysis, get_available_models
+from run_models import run_parallel_analysis, get_available_models
 from utils.redis_helper import (
     get_chunk_video_key,
     get_chunk_audio_key,
