@@ -13,24 +13,35 @@ class VideoApp {
         this.permissionInfo = document.getElementById('permission-info');
         this.localStream = null;
         this.mediaRecorder = null;
-        this.sessionId = null;
         this.socket = null;
         this.socketConnected = false;
         this.mediaConstraints = { video: true, audio: true };
-        this.chunkIndex = 0;
         this.chunkTimer = null;
         this.isRecording = false;
         this.chunkDurationMs = 30000;  // Default, will be overridden by backend
+
+        // Session-specific state (initialized when camera starts)
+        this.sessionId = null;
+        this.chunkIndex = null;
+
         this.initializeWebSocket();
         this.initializeEventListeners();
     }
 
+    initializeSession() {
+        this.sessionId = `session_${Date.now()}`;
+        this.chunkIndex = 1;
+    }
+
+    resetSession() {
+        this.sessionId = null;
+        this.chunkIndex = null;
+    }
+
     initializeWebSocket() {
         if (typeof io === 'undefined') return;
-        const { protocol, hostname, port } = window.location;
-        const backendPort = (hostname === 'localhost' || hostname === '127.0.0.1') 
-            ? (port === '3000' ? '5555' : (port || '5000'))
-            : (port || '5555');
+        const { protocol, hostname } = window.location;
+        const backendPort = '5555';  // Backend runs on port 5555
         this.socket = io(`${protocol}//${hostname}:${backendPort}`, {
             transports: ['websocket'],
             reconnection: true,
@@ -53,7 +64,7 @@ class VideoApp {
         this.socket.on('stream_acknowledged', (data) => {
             if (data.chunkDurationMs) {
                 this.chunkDurationMs = data.chunkDurationMs;
-                console.log(`Chunk duration set to ${this.chunkDurationMs}ms by backend`);
+                console.log(`Chunk duration set to ${this.chunkDurationMs}ms`);
             }
         });
     }
@@ -84,9 +95,8 @@ class VideoApp {
             this.startButton.disabled = true;
             this.stopButton.disabled = false;
 
-            // Generate session ID
-            this.sessionId = `stream_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-            this.chunkIndex = 0;
+            // Initialize new session
+            this.initializeSession();
 
             // Start recording after a short delay
             setTimeout(() => {
@@ -155,6 +165,18 @@ class VideoApp {
             if (event.data && event.data.size > 0) {
                 const reader = new FileReader();
                 reader.onloadend = () => {
+                    // Skip if session has been reset (camera was stopped)
+                    if (this.sessionId === null || this.chunkIndex === null) {
+                        console.log('Skipping chunk upload - session ended');
+                        return;
+                    }
+
+                    // Validate that we have actual data
+                    if (!reader.result || reader.result.byteLength === 0) {
+                        console.error('FileReader produced empty result, skipping chunk');
+                        return;
+                    }
+
                     const sizeKb = Math.round(event.data.size / 1024);
                     console.log(`Chunk ${this.chunkIndex} uploaded (${sizeKb} KB)`);
                     this.sendWebSocketMessage('video_chunk', {
@@ -166,7 +188,9 @@ class VideoApp {
                         durationMs: this.chunkDurationMs
                     });
                 };
-                reader.onerror = () => console.error('FileReader error');
+                reader.onerror = (error) => {
+                    console.error('FileReader error:', error);
+                };
                 reader.readAsArrayBuffer(event.data);
             }
         };
@@ -206,9 +230,9 @@ class VideoApp {
             this.localStream.getTracks().forEach(track => track.stop());
             this.videoElement.srcObject = null;
             this.localStream = null;
-            this.sessionId = null;
         }
 
+        this.resetSession();
         this.updateConnectionStatus(false);
         this.startButton.disabled = false;
         this.stopButton.disabled = true;
