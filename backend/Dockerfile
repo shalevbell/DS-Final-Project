@@ -8,6 +8,7 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     --mount=type=cache,target=/var/lib/apt,sharing=locked \
     apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg \
+    libgomp1 \
     postgresql-client \
     && rm -rf /var/lib/apt/lists/*
 
@@ -16,7 +17,8 @@ COPY requirements.txt .
 
 # Install Python dependencies with BuildKit cache mount for pip
 RUN --mount=type=cache,target=/root/.cache/pip \
-    pip install --no-cache-dir -r requirements.txt
+    pip install --no-cache-dir -r requirements.txt \
+    && pip install --no-cache-dir faster-whisper
 
 # Copy application code (this layer changes most frequently)
 COPY . .
