@@ -5,9 +5,16 @@ Provides interfaces for ML models and functions neeeded for chunk processing.
 """
 
 import logging
+import os
+import tempfile
 import time
+import traceback
 from typing import Dict
 from concurrent.futures import ThreadPoolExecutor
+
+from faster_whisper import WhisperModel
+
+from config import Config
 
 logger = logging.getLogger(__name__)
 
@@ -44,17 +51,11 @@ def analyze_audio_whisper(audio_bytes: bytes, session_id: str, chunk_index: int)
             'processing_time_ms': int
         }
     """
-    import os
-    import tempfile
-    import traceback
-
     start_time = time.time()
     temp_path = None
 
     try:
         logger.info(f'[Whisper] Start chunk {session_id}:{chunk_index}')
-
-        from faster_whisper import WhisperModel
 
         if isinstance(audio_bytes, (bytes, bytearray)):
             with tempfile.NamedTemporaryFile(suffix='.mp3', delete=False) as tmp_file:
@@ -73,13 +74,13 @@ def analyze_audio_whisper(audio_bytes: bytes, session_id: str, chunk_index: int)
 
         if not hasattr(analyze_audio_whisper, '_model'):
             logger.info(
-                '[Whisper] Loading faster-whisper model "base.en" (CPU). '
+                f'[Whisper] Loading faster-whisper model "{Config.WHISPER_MODEL_NAME}" ({Config.WHISPER_DEVICE}). '
                 'First run can be slow due to model download.'
             )
             analyze_audio_whisper._model = WhisperModel(
-                'base.en',
-                device='cpu',
-                compute_type='int8'
+                Config.WHISPER_MODEL_NAME,
+                device=Config.WHISPER_DEVICE,
+                compute_type=Config.WHISPER_COMPUTE_TYPE
             )
 
         model = analyze_audio_whisper._model

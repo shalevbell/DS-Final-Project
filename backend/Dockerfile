@@ -22,8 +22,7 @@ COPY requirements.txt .
 
 # Install Python dependencies with BuildKit cache mount for pip
 RUN --mount=type=cache,target=/root/.cache/pip \
-    pip install --no-cache-dir -r requirements.txt \
-    && pip install --no-cache-dir faster-whisper
+    pip install --no-cache-dir -r requirements.txt
 
 # Copy application code (this layer changes most frequently)
 COPY . .

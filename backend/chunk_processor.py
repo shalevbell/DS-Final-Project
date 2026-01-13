@@ -277,7 +277,8 @@ class ChunkProcessor:
             chunk_index: Chunk index within session
         """
         start_time = time.time()
-
+        
+        logger.info('----------------------------------------')
         logger.info(f'Processing chunk {session_id}:{chunk_index}')
 
         # 1. Update status to 'processing'
