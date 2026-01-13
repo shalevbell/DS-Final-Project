@@ -2,12 +2,18 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
-# Install system dependencies with BuildKit cache mount for apt
-# Using multiple mirrors and --no-install-recommends for faster downloads
+# Install ffmpeg in its own layer for better caching
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     --mount=type=cache,target=/var/lib/apt,sharing=locked \
     apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install other system dependencies
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt,sharing=locked \
+    apt-get update && apt-get install -y --no-install-recommends \
+    libgomp1 \
     postgresql-client \
     && rm -rf /var/lib/apt/lists/*
 

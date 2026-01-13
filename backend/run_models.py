@@ -5,9 +5,16 @@ Provides interfaces for ML models and functions neeeded for chunk processing.
 """
 
 import logging
+import os
+import tempfile
 import time
+import traceback
 from typing import Dict
 from concurrent.futures import ThreadPoolExecutor
+
+from faster_whisper import WhisperModel
+
+from config import Config
 
 logger = logging.getLogger(__name__)
 
@@ -45,44 +52,104 @@ def analyze_audio_whisper(audio_bytes: bytes, session_id: str, chunk_index: int)
         }
     """
     start_time = time.time()
+    temp_path = None
 
     try:
-        logger.info(f'[Whisper] Processing chunk {session_id}:{chunk_index} ({len(audio_bytes)} bytes)')
+        logger.info(f'[Whisper] Start chunk {session_id}:{chunk_index}')
 
-        # TODO: Replace with actual Whisper implementation
-        # Example integration:
-        # import whisper
-        # model = whisper.load_model("base")
-        # result = model.transcribe(audio_file)
+        if isinstance(audio_bytes, (bytes, bytearray)):
+            with tempfile.NamedTemporaryFile(suffix='.mp3', delete=False) as tmp_file:
+                tmp_file.write(audio_bytes)
+                temp_path = tmp_file.name
+            logger.info(
+                f'[Whisper] Saved audio to temp file: {temp_path} '
+                f'({len(audio_bytes)} bytes)'
+            )
+            audio_source = temp_path
+        elif isinstance(audio_bytes, str):
+            audio_source = audio_bytes
+            logger.info(f'[Whisper] Using audio path: {audio_source}')
+        else:
+            raise ValueError(f'Unsupported audio input type: {type(audio_bytes).__name__}')
 
-        # Placeholder implementation
-        time.sleep(0.1)  # Simulate processing time
+        if not hasattr(analyze_audio_whisper, '_model'):
+            logger.info(
+                f'[Whisper] Loading faster-whisper model "{Config.WHISPER_MODEL_NAME}" ({Config.WHISPER_DEVICE}). '
+                'First run can be slow due to model download.'
+            )
+            analyze_audio_whisper._model = WhisperModel(
+                Config.WHISPER_MODEL_NAME,
+                device=Config.WHISPER_DEVICE,
+                compute_type=Config.WHISPER_COMPUTE_TYPE
+            )
 
-        processing_time = int((time.time() - start_time) * 1000)
+        model = analyze_audio_whisper._model
+
+        logger.info(f'[Whisper] Starting transcription: {session_id}:{chunk_index}')
+
+        segments, info = model.transcribe(
+            audio_source,
+            beam_size=1,
+            vad_filter=True,
+            word_timestamps=False
+        )
+
+        segment_list = []
+        transcript_parts = []
+        for segment in segments:
+            segment_list.append(
+                {
+                    'start': float(segment.start),
+                    'end': float(segment.end),
+                    'text': segment.text
+                }
+            )
+            transcript_parts.append(segment.text)
+
+        transcript_text = ' '.join(part.strip() for part in transcript_parts if part).strip()
+        if transcript_text:
+            logger.info(f'[Whisper] Transcript: {transcript_text}')
+
+        processing_time_sec = time.time() - start_time
+        audio_duration = getattr(info, 'duration', None)
+        audio_duration_sec = float(audio_duration) if audio_duration else None
+        rtf = (processing_time_sec / audio_duration_sec) if audio_duration_sec else None
+        audio_duration_label = f'{audio_duration_sec:.2f}s' if audio_duration_sec else 'n/a'
+        rtf_label = f'{rtf:.3f}' if rtf is not None else 'n/a'
+
+        logger.info(
+            f'[Whisper] Completed chunk {session_id}:{chunk_index} '
+            f'in {processing_time_sec:.2f}s, '
+            f'audio_duration={audio_duration_label}, '
+            f'RTF={rtf_label}'
+        )
 
         result = {
-            'transcript': '[Whisper transcription placeholder - actual model to be integrated]',
-            'confidence': 0.95,
-            'language': 'en',
-            'segments': [
-                {
-                    'start': 0.0,
-                    'end': 5.0,
-                    'text': 'Sample transcription segment'
-                }
-            ],
-            'processing_time_ms': processing_time
+            'transcript': transcript_text,
+            'confidence': getattr(info, 'language_probability', None),
+            'language': getattr(info, 'language', 'en'),
+            'segments': segment_list,
+            'processing_time_ms': int(processing_time_sec * 1000)
         }
 
-        logger.info(f'[Whisper] Completed chunk {session_id}:{chunk_index} in {processing_time}ms')
         return result
 
     except Exception as e:
-        logger.error(f'[Whisper] Error processing chunk {session_id}:{chunk_index}: {e}')
+        logger.error(
+            f'[Whisper] Error processing chunk {session_id}:{chunk_index}: {e}\n'
+            f'{traceback.format_exc()}'
+        )
         return {
             'error': str(e),
             'processing_time_ms': int((time.time() - start_time) * 1000)
         }
+    finally:
+        if temp_path and os.path.exists(temp_path):
+            try:
+                os.remove(temp_path)
+                logger.info(f'[Whisper] Removed temp file: {temp_path}')
+            except Exception as cleanup_error:
+                logger.warning(f'[Whisper] Temp cleanup failed: {cleanup_error}')
 
 
 def analyze_video_mediapipe(video_bytes: bytes, session_id: str, chunk_index: int) -> Dict:

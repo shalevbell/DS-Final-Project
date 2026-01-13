@@ -37,3 +37,8 @@ class Config:
 
     # Chunk configuration
     CHUNK_DURATION_MS = 30000  # Video chunk duration in milliseconds (30 seconds)
+
+    # Whisper model configuration
+    WHISPER_MODEL_NAME = os.getenv('WHISPER_MODEL_NAME', 'base.en')
+    WHISPER_DEVICE = os.getenv('WHISPER_DEVICE', 'cpu')
+    WHISPER_COMPUTE_TYPE = os.getenv('WHISPER_COMPUTE_TYPE', 'int8')
