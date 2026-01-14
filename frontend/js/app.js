@@ -8,9 +8,9 @@ class VideoApp {
     constructor() {
         this.videoElement = document.getElementById('video-preview');
         this.connectionStatus = document.getElementById('connection-status');
-        this.startButton = document.getElementById('btn-start-camera');
-        this.stopButton = document.getElementById('btn-stop-camera');
+        this.toggleButton = document.getElementById('btn-toggle-camera');
         this.permissionInfo = document.getElementById('permission-info');
+        this.cameraSelect = document.getElementById('camera-select');
         this.localStream = null;
         this.mediaRecorder = null;
         this.socket = null;
@@ -18,6 +18,7 @@ class VideoApp {
         this.mediaConstraints = { video: true, audio: true };
         this.chunkTimer = null;
         this.isRecording = false;
+        this.isCameraActive = false;
         this.chunkDurationMs = 30000;  // Default, will be overridden by backend
 
         // Session-specific state (initialized when camera starts)
@@ -26,6 +27,7 @@ class VideoApp {
 
         this.initializeWebSocket();
         this.initializeEventListeners();
+        this.enumerateCameras();
     }
 
     initializeSession() {
@@ -76,8 +78,44 @@ class VideoApp {
     }
 
     initializeEventListeners() {
-        this.startButton.addEventListener('click', () => this.startCamera());
-        this.stopButton.addEventListener('click', () => this.stopCamera());
+        this.toggleButton.addEventListener('click', () => {
+            if (this.isCameraActive) {
+                this.stopCamera();
+            } else {
+                this.startCamera();
+            }
+        });
+    }
+
+    async enumerateCameras() {
+        try {
+            if (!navigator.mediaDevices?.enumerateDevices) {
+                console.warn('enumerateDevices not supported');
+                return;
+            }
+
+            const devices = await navigator.mediaDevices.enumerateDevices();
+            const videoDevices = devices.filter(device => device.kind === 'videoinput');
+
+            this.cameraSelect.innerHTML = '';
+
+            if (videoDevices.length === 0) {
+                this.cameraSelect.innerHTML = '<option value="">No cameras found</option>';
+                return;
+            }
+
+            videoDevices.forEach((device, index) => {
+                const option = document.createElement('option');
+                option.value = device.deviceId;
+                option.text = device.label || `Camera ${index + 1}`;
+                this.cameraSelect.appendChild(option);
+            });
+
+            console.log(`Found ${videoDevices.length} camera(s)`);
+        } catch (error) {
+            console.error('Error enumerating cameras:', error);
+            this.cameraSelect.innerHTML = '<option value="">Error loading cameras</option>';
+        }
     }
 
     async startCamera() {
@@ -86,14 +124,28 @@ class VideoApp {
                 throw new Error('getUserMedia is not supported');
             }
 
-            this.localStream = await navigator.mediaDevices.getUserMedia(this.mediaConstraints);
+            // Get selected camera deviceId
+            const selectedDeviceId = this.cameraSelect.value;
+
+            // Build constraints with selected camera
+            const constraints = {
+                audio: true,
+                video: selectedDeviceId ? { deviceId: { exact: selectedDeviceId } } : true
+            };
+
+            this.localStream = await navigator.mediaDevices.getUserMedia(constraints);
 
             this.videoElement.srcObject = this.localStream;
             this.videoElement.play().catch(err => console.error('Video play error:', err));
 
+            // Refresh camera list to get proper labels (available after permission granted)
+            await this.enumerateCameras();
+
             this.updateConnectionStatus(true);
-            this.startButton.disabled = true;
-            this.stopButton.disabled = false;
+            this.isCameraActive = true;
+            this.toggleButton.textContent = 'Stop Camera';
+            this.toggleButton.classList.remove('btn-primary');
+            this.toggleButton.classList.add('btn-danger');
 
             // Initialize new session
             this.initializeSession();
@@ -234,8 +286,10 @@ class VideoApp {
 
         this.resetSession();
         this.updateConnectionStatus(false);
-        this.startButton.disabled = false;
-        this.stopButton.disabled = true;
+        this.isCameraActive = false;
+        this.toggleButton.textContent = 'Start Camera';
+        this.toggleButton.classList.remove('btn-danger');
+        this.toggleButton.classList.add('btn-primary');
         console.log('Camera stopped');
     }
     
@@ -261,8 +315,10 @@ class VideoApp {
         };
         alert(messages[error.name] || `Error: ${error.message || error.name}`);
         this.updateConnectionStatus(false);
-        this.startButton.disabled = false;
-        this.stopButton.disabled = true;
+        this.isCameraActive = false;
+        this.toggleButton.textContent = 'Start Camera';
+        this.toggleButton.classList.remove('btn-danger');
+        this.toggleButton.classList.add('btn-primary');
         this.sendWebSocketMessage('camera_error', { error: error.name, message: error.message });
     }
 }

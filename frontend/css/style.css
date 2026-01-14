@@ -108,21 +108,58 @@ body {
     }
 }
 
-/* Video Controls */
-.video-controls {
+/* Camera Selector */
+.camera-selector {
+    margin-bottom: 12px;
     display: flex;
+    align-items: center;
     gap: 10px;
 }
 
-.btn {
+.camera-selector label {
+    font-size: 12px;
+    font-weight: 500;
+    color: #718096;
+    white-space: nowrap;
+}
+
+.camera-dropdown {
     flex: 1;
-    padding: 12px 24px;
+    padding: 6px 10px;
+    font-size: 12px;
+    border: 1px solid #e2e8f0;
+    border-radius: 4px;
+    background-color: white;
+    color: #4a5568;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.camera-dropdown:hover {
+    border-color: #cbd5e0;
+}
+
+.camera-dropdown:focus {
+    outline: none;
+    border-color: #667eea;
+    box-shadow: 0 0 0 2px rgba(102, 126, 234, 0.08);
+}
+
+/* Video Controls */
+.video-controls {
+    display: flex;
+    justify-content: center;
+}
+
+.btn {
+    padding: 12px 32px;
     border: none;
     border-radius: 6px;
     font-size: 14px;
     font-weight: 600;
     cursor: pointer;
     transition: all 0.3s;
+    min-width: 240px;
 }
 
 .btn:disabled {

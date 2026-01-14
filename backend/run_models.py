@@ -9,9 +9,15 @@ import os
 import tempfile
 import time
 import traceback
-from typing import Dict
+import urllib.request
+from collections import Counter
+from pathlib import Path
+from typing import Dict, List, Optional
 from concurrent.futures import ThreadPoolExecutor
 
+import cv2
+import mediapipe as mp
+import numpy as np
 from faster_whisper import WhisperModel
 
 from config import Config
@@ -152,11 +158,167 @@ def analyze_audio_whisper(audio_bytes: bytes, session_id: str, chunk_index: int)
                 logger.warning(f'[Whisper] Temp cleanup failed: {cleanup_error}')
 
 
+def _download_mediapipe_model(model_name: str, url: str, models_dir: Path) -> bool:
+    """
+    Download MediaPipe model if not present.
+
+    Args:
+        model_name: Name of the model file
+        url: Download URL
+        models_dir: Directory to store model
+
+    Returns:
+        True if downloaded successfully or already exists, False otherwise
+    """
+    model_path = models_dir / model_name
+
+    if model_path.exists():
+        return True
+
+    try:
+        logger.info(f'[MediaPipe] Downloading {model_name}...')
+        urllib.request.urlretrieve(url, model_path)
+        logger.info(f'[MediaPipe] Downloaded {model_name}')
+        return True
+    except Exception as e:
+        logger.error(f'[MediaPipe] Error downloading {model_name}: {e}')
+        return False
+
+
+def _analyze_face_simple(face_landmarks_list: List) -> Dict:
+    """
+    Simplified facial analysis for emotion detection.
+
+    Args:
+        face_landmarks_list: List of detected face landmarks
+
+    Returns:
+        Dictionary with emotion and confidence
+    """
+    if not face_landmarks_list or len(face_landmarks_list) == 0:
+        return {'emotion': 'neutral', 'confidence': 0.0, 'detected': False}
+
+    face_landmarks = face_landmarks_list[0]
+    emotions = []
+
+    try:
+        # Mouth analysis for smile/frown
+        upper_lip = face_landmarks[13]
+        lower_lip = face_landmarks[14]
+        left_mouth_corner = face_landmarks[61]
+        right_mouth_corner = face_landmarks[291]
+
+        mouth_height = abs(upper_lip.y - lower_lip.y)
+        mouth_center_y = (upper_lip.y + lower_lip.y) / 2
+        corners_avg_y = (left_mouth_corner.y + right_mouth_corner.y) / 2
+        smile_ratio = mouth_center_y - corners_avg_y
+
+        if smile_ratio > 0.01:
+            emotions.append('happy')
+        elif smile_ratio < -0.01:
+            emotions.append('sad')
+
+        if mouth_height > 0.04:
+            emotions.append('surprised')
+
+        # Eyebrow analysis
+        left_eyebrow = face_landmarks[70]
+        right_eyebrow = face_landmarks[300]
+        left_eye_top = face_landmarks[159]
+        right_eye_top = face_landmarks[386]
+
+        avg_brow_distance = (abs(left_eyebrow.y - left_eye_top.y) +
+                            abs(right_eyebrow.y - right_eye_top.y)) / 2
+
+        if avg_brow_distance > 0.06:
+            emotions.append('surprised')
+
+        # Default to neutral if no strong emotion
+        if not emotions:
+            emotions.append('neutral')
+        else:
+            emotions.append('engaged')
+
+        # Get most common emotion
+        emotion_counts = Counter(emotions)
+        dominant_emotion = emotion_counts.most_common(1)[0][0]
+        confidence = min(emotion_counts[dominant_emotion] / len(emotions), 1.0)
+
+        return {
+            'emotion': dominant_emotion,
+            'confidence': confidence,
+            'detected': True,
+            'all_emotions': list(set(emotions))
+        }
+
+    except Exception as e:
+        logger.debug(f'[MediaPipe] Face analysis error: {e}')
+        return {'emotion': 'neutral', 'confidence': 0.0, 'detected': True}
+
+
+def _analyze_posture_simple(pose_landmarks_list: List) -> Dict:
+    """
+    Simplified posture analysis.
+
+    Args:
+        pose_landmarks_list: List of detected pose landmarks
+
+    Returns:
+        Dictionary with posture score
+    """
+    if not pose_landmarks_list or len(pose_landmarks_list) == 0:
+        return {'score': 0.5, 'detected': False}
+
+    pose_landmarks = pose_landmarks_list[0]
+    score = 0.5  # Default fair posture
+
+    try:
+        left_shoulder = pose_landmarks[11]
+        right_shoulder = pose_landmarks[12]
+        left_hip = pose_landmarks[23]
+        right_hip = pose_landmarks[24]
+
+        # Check body lean
+        shoulder_center_x = (left_shoulder.x + right_shoulder.x) / 2
+        hip_center_x = (left_hip.x + right_hip.x) / 2
+        lean = abs(shoulder_center_x - hip_center_x)
+
+        if lean < 0.03:
+            score = 0.9  # Good upright posture
+        elif lean < 0.08:
+            score = 0.6  # Fair posture
+        else:
+            score = 0.3  # Poor posture
+
+        return {'score': score, 'detected': True}
+
+    except Exception as e:
+        logger.debug(f'[MediaPipe] Posture analysis error: {e}')
+        return {'score': 0.5, 'detected': True}
+
+
+def _analyze_hands_simple(hand_landmarks_list: List) -> Dict:
+    """
+    Simplified hand gesture analysis.
+
+    Args:
+        hand_landmarks_list: List of detected hand landmarks
+
+    Returns:
+        Dictionary with hand gesture info
+    """
+    if not hand_landmarks_list or len(hand_landmarks_list) == 0:
+        return {'detected': False, 'count': 0}
+
+    return {
+        'detected': True,
+        'count': len(hand_landmarks_list)
+    }
+
+
 def analyze_video_mediapipe(video_bytes: bytes, session_id: str, chunk_index: int) -> Dict:
     """
     Analyze video for facial expressions, gestures, and posture using MediaPipe.
-
-    TODO: Integrate actual MediaPipe model from /test/video_analysis.py
 
     Args:
         video_bytes: MP4 video data
@@ -167,50 +329,239 @@ def analyze_video_mediapipe(video_bytes: bytes, session_id: str, chunk_index: in
         Dictionary with video analysis results:
         {
             'emotions': list,
-            'gestures': list,
+            'dominant_emotion': str,
+            'emotion_confidence': float,
             'posture_score': float,
-            'eye_contact_score': float,
             'engagement_score': float,
+            'hand_gestures_detected': bool,
+            'facial_landmarks_detected': bool,
+            'pose_landmarks_detected': bool,
+            'frames_analyzed': int,
             'processing_time_ms': int
         }
     """
     start_time = time.time()
+    temp_path = None
 
     try:
         logger.info(f'[MediaPipe] Processing chunk {session_id}:{chunk_index} ({len(video_bytes)} bytes)')
 
-        # TODO: Replace with actual MediaPipe implementation
-        # Example integration:
-        # import mediapipe as mp
-        # mp_holistic = mp.solutions.holistic
-        # with mp_holistic.Holistic() as holistic:
-        #     results = holistic.process(frame)
+        # Initialize MediaPipe models on first use (lazy loading)
+        if not hasattr(analyze_video_mediapipe, '_landmarkers'):
+            logger.info('[MediaPipe] Initializing models (first use)...')
 
-        # Placeholder implementation
-        time.sleep(0.15)  # Simulate processing time
+            # Create models directory
+            models_dir = Path(Config.MEDIAPIPE_MODEL_DIR)
+            models_dir.mkdir(exist_ok=True, parents=True)
+
+            # Model URLs
+            model_urls = {
+                Config.MEDIAPIPE_FACE_MODEL: 'https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task',
+                Config.MEDIAPIPE_POSE_MODEL: 'https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task',
+                Config.MEDIAPIPE_HAND_MODEL: 'https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task'
+            }
+
+            # Download models if needed
+            for model_name, url in model_urls.items():
+                if not _download_mediapipe_model(model_name, url, models_dir):
+                    raise RuntimeError(f'Failed to download {model_name}')
+
+            # Initialize landmarkers
+            base_options_face = mp.tasks.BaseOptions(
+                model_asset_path=str(models_dir / Config.MEDIAPIPE_FACE_MODEL)
+            )
+            base_options_pose = mp.tasks.BaseOptions(
+                model_asset_path=str(models_dir / Config.MEDIAPIPE_POSE_MODEL)
+            )
+            base_options_hand = mp.tasks.BaseOptions(
+                model_asset_path=str(models_dir / Config.MEDIAPIPE_HAND_MODEL)
+            )
+
+            face_options = mp.tasks.vision.FaceLandmarkerOptions(
+                base_options=base_options_face,
+                running_mode=mp.tasks.vision.RunningMode.VIDEO,
+                num_faces=1,
+                min_face_detection_confidence=Config.MEDIAPIPE_FACE_MIN_DETECTION_CONFIDENCE,
+                min_face_presence_confidence=Config.MEDIAPIPE_FACE_MIN_PRESENCE_CONFIDENCE,
+                min_tracking_confidence=Config.MEDIAPIPE_FACE_MIN_TRACKING_CONFIDENCE
+            )
+
+            pose_options = mp.tasks.vision.PoseLandmarkerOptions(
+                base_options=base_options_pose,
+                running_mode=mp.tasks.vision.RunningMode.VIDEO,
+                min_pose_detection_confidence=Config.MEDIAPIPE_POSE_MIN_DETECTION_CONFIDENCE,
+                min_pose_presence_confidence=Config.MEDIAPIPE_POSE_MIN_PRESENCE_CONFIDENCE,
+                min_tracking_confidence=Config.MEDIAPIPE_POSE_MIN_TRACKING_CONFIDENCE
+            )
+
+            hand_options = mp.tasks.vision.HandLandmarkerOptions(
+                base_options=base_options_hand,
+                running_mode=mp.tasks.vision.RunningMode.VIDEO,
+                num_hands=2,
+                min_hand_detection_confidence=Config.MEDIAPIPE_HAND_MIN_DETECTION_CONFIDENCE,
+                min_hand_presence_confidence=Config.MEDIAPIPE_HAND_MIN_PRESENCE_CONFIDENCE,
+                min_tracking_confidence=Config.MEDIAPIPE_HAND_MIN_TRACKING_CONFIDENCE
+            )
+
+            analyze_video_mediapipe._landmarkers = {
+                'face': mp.tasks.vision.FaceLandmarker.create_from_options(face_options),
+                'pose': mp.tasks.vision.PoseLandmarker.create_from_options(pose_options),
+                'hand': mp.tasks.vision.HandLandmarker.create_from_options(hand_options)
+            }
+
+            logger.info('[MediaPipe] Models initialized successfully')
+
+        # Save video bytes to temporary file
+        with tempfile.NamedTemporaryFile(suffix='.mp4', delete=False) as tmp_file:
+            tmp_file.write(video_bytes)
+            temp_path = tmp_file.name
+
+        # Open video with OpenCV
+        cap = cv2.VideoCapture(temp_path)
+        if not cap.isOpened():
+            raise ValueError(f'Could not open video file')
+
+        fps = cap.get(cv2.CAP_PROP_FPS)
+        total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        duration_sec = total_frames / fps if fps > 0 else 0
+
+        logger.info(
+            f'[MediaPipe] Video properties for {session_id}:{chunk_index}: '
+            f'{total_frames} frames, {fps:.2f} fps, {duration_sec:.2f}s duration, '
+            f'sample_rate={Config.MEDIAPIPE_FRAME_SAMPLE_RATE}'
+        )
+
+        frame_count = 0
+        frames_analyzed = 0
+
+        # Aggregate results
+        all_face_results = []
+        all_pose_results = []
+        all_hand_results = []
+
+        # Process frames
+        while cap.isOpened():
+            ret, frame = cap.read()
+            if not ret:
+                break
+
+            # Sample every Nth frame
+            if frame_count % Config.MEDIAPIPE_FRAME_SAMPLE_RATE == 0:
+                # Convert BGR to RGB
+                rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+
+                # Create MediaPipe Image
+                mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb_frame)
+
+                # Calculate timestamp in milliseconds
+                timestamp_ms = int((frame_count / fps) * 1000) if fps > 0 else frame_count * 33
+
+                # Process with landmarkers
+                try:
+                    face_result = analyze_video_mediapipe._landmarkers['face'].detect_for_video(mp_image, timestamp_ms)
+                    pose_result = analyze_video_mediapipe._landmarkers['pose'].detect_for_video(mp_image, timestamp_ms)
+                    hand_result = analyze_video_mediapipe._landmarkers['hand'].detect_for_video(mp_image, timestamp_ms)
+
+                    all_face_results.append(face_result.face_landmarks)
+                    all_pose_results.append(pose_result.pose_landmarks)
+                    all_hand_results.append(hand_result.hand_landmarks)
+
+                    frames_analyzed += 1
+                except Exception as e:
+                    logger.debug(f'[MediaPipe] Frame {frame_count} processing error: {e}')
+
+            frame_count += 1
+
+        cap.release()
+
+        # Analyze aggregated results
+        emotions_list = []
+        emotion_confidences = []
+        posture_scores = []
+        hand_detected_count = 0
+
+        for face_landmarks in all_face_results:
+            face_analysis = _analyze_face_simple(face_landmarks)
+            if face_analysis['detected']:
+                emotions_list.append(face_analysis['emotion'])
+                emotion_confidences.append(face_analysis['confidence'])
+
+        for pose_landmarks in all_pose_results:
+            posture_analysis = _analyze_posture_simple(pose_landmarks)
+            if posture_analysis['detected']:
+                posture_scores.append(posture_analysis['score'])
+
+        for hand_landmarks in all_hand_results:
+            hand_analysis = _analyze_hands_simple(hand_landmarks)
+            if hand_analysis['detected']:
+                hand_detected_count += 1
+
+        # Calculate final metrics
+        dominant_emotion = Counter(emotions_list).most_common(1)[0][0] if emotions_list else 'neutral'
+        avg_emotion_confidence = sum(emotion_confidences) / len(emotion_confidences) if emotion_confidences else 0.0
+        avg_posture_score = sum(posture_scores) / len(posture_scores) if posture_scores else 0.5
+        hand_gestures_detected = hand_detected_count > 0
+
+        # Log analysis results
+        logger.info(
+            f'[MediaPipe] Analysis: emotion={dominant_emotion} (conf={avg_emotion_confidence:.2f}), '
+            f'posture={avg_posture_score:.2f}, hands={hand_gestures_detected}, '
+            f'face_detected={len(emotions_list) > 0}, pose_detected={len(posture_scores) > 0}'
+        )
+
+        # Calculate engagement score
+        face_visibility_score = len(emotions_list) / max(frames_analyzed, 1)
+        positive_emotion_score = 1.0 if dominant_emotion in ['happy', 'engaged'] else 0.5
+        posture_contribution = avg_posture_score
+        hand_contribution = 1.0 if hand_gestures_detected else 0.5
+
+        engagement_score = (
+            face_visibility_score * 0.2 +
+            positive_emotion_score * 0.3 +
+            posture_contribution * 0.3 +
+            hand_contribution * 0.2
+        )
 
         processing_time = int((time.time() - start_time) * 1000)
 
         result = {
-            'emotions': ['neutral', 'engaged'],
-            'gestures': ['talking', 'hand_gesture'],
-            'posture_score': 0.8,
-            'eye_contact_score': 0.7,
-            'engagement_score': 0.75,
-            'facial_landmarks_detected': True,
-            'pose_landmarks_detected': True,
+            'emotions': list(set(emotions_list)) if emotions_list else ['neutral'],
+            'dominant_emotion': dominant_emotion,
+            'emotion_confidence': round(avg_emotion_confidence, 2),
+            'posture_score': round(avg_posture_score, 2),
+            'engagement_score': round(engagement_score, 2),
+            'hand_gestures_detected': hand_gestures_detected,
+            'facial_landmarks_detected': len(emotions_list) > 0,
+            'pose_landmarks_detected': len(posture_scores) > 0,
+            'frames_analyzed': frames_analyzed,
             'processing_time_ms': processing_time
         }
 
-        logger.info(f'[MediaPipe] Completed chunk {session_id}:{chunk_index} in {processing_time}ms')
+        logger.info(
+            f'[MediaPipe] Completed chunk {session_id}:{chunk_index} in {processing_time}ms '
+            f'(analyzed {frames_analyzed} frames, emotion: {dominant_emotion}, '
+            f'posture: {avg_posture_score:.2f}, engagement: {engagement_score:.2f})'
+        )
+
         return result
 
     except Exception as e:
-        logger.error(f'[MediaPipe] Error processing chunk {session_id}:{chunk_index}: {e}')
+        logger.error(
+            f'[MediaPipe] Error processing chunk {session_id}:{chunk_index}: {e}\n'
+            f'{traceback.format_exc()}'
+        )
         return {
             'error': str(e),
             'processing_time_ms': int((time.time() - start_time) * 1000)
         }
+
+    finally:
+        if temp_path and os.path.exists(temp_path):
+            try:
+                os.remove(temp_path)
+                logger.debug(f'[MediaPipe] Removed temp file: {temp_path}')
+            except Exception as cleanup_error:
+                logger.warning(f'[MediaPipe] Temp cleanup failed: {cleanup_error}')
 
 
 def analyze_vocal_tone(audio_bytes: bytes, session_id: str, chunk_index: int) -> Dict:
