@@ -379,7 +379,7 @@ def analyze_video_mediapipe(video_bytes: bytes, session_id: str, chunk_index: in
 
             face_options = mp.tasks.vision.FaceLandmarkerOptions(
                 base_options=base_options_face,
-                running_mode=mp.tasks.vision.RunningMode.VIDEO,
+                running_mode=mp.tasks.vision.RunningMode.IMAGE,
                 num_faces=1,
                 min_face_detection_confidence=Config.MEDIAPIPE_FACE_MIN_DETECTION_CONFIDENCE,
                 min_face_presence_confidence=Config.MEDIAPIPE_FACE_MIN_PRESENCE_CONFIDENCE,
@@ -388,7 +388,7 @@ def analyze_video_mediapipe(video_bytes: bytes, session_id: str, chunk_index: in
 
             pose_options = mp.tasks.vision.PoseLandmarkerOptions(
                 base_options=base_options_pose,
-                running_mode=mp.tasks.vision.RunningMode.VIDEO,
+                running_mode=mp.tasks.vision.RunningMode.IMAGE,
                 min_pose_detection_confidence=Config.MEDIAPIPE_POSE_MIN_DETECTION_CONFIDENCE,
                 min_pose_presence_confidence=Config.MEDIAPIPE_POSE_MIN_PRESENCE_CONFIDENCE,
                 min_tracking_confidence=Config.MEDIAPIPE_POSE_MIN_TRACKING_CONFIDENCE
@@ -396,7 +396,7 @@ def analyze_video_mediapipe(video_bytes: bytes, session_id: str, chunk_index: in
 
             hand_options = mp.tasks.vision.HandLandmarkerOptions(
                 base_options=base_options_hand,
-                running_mode=mp.tasks.vision.RunningMode.VIDEO,
+                running_mode=mp.tasks.vision.RunningMode.IMAGE,
                 num_hands=2,
                 min_hand_detection_confidence=Config.MEDIAPIPE_HAND_MIN_DETECTION_CONFIDENCE,
                 min_hand_presence_confidence=Config.MEDIAPIPE_HAND_MIN_PRESENCE_CONFIDENCE,
@@ -453,14 +453,11 @@ def analyze_video_mediapipe(video_bytes: bytes, session_id: str, chunk_index: in
                 # Create MediaPipe Image
                 mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb_frame)
 
-                # Calculate timestamp in milliseconds
-                timestamp_ms = int((frame_count / fps) * 1000) if fps > 0 else frame_count * 33
-
-                # Process with landmarkers
+                # Process with landmarkers (IMAGE mode - no timestamp needed)
                 try:
-                    face_result = analyze_video_mediapipe._landmarkers['face'].detect_for_video(mp_image, timestamp_ms)
-                    pose_result = analyze_video_mediapipe._landmarkers['pose'].detect_for_video(mp_image, timestamp_ms)
-                    hand_result = analyze_video_mediapipe._landmarkers['hand'].detect_for_video(mp_image, timestamp_ms)
+                    face_result = analyze_video_mediapipe._landmarkers['face'].detect(mp_image)
+                    pose_result = analyze_video_mediapipe._landmarkers['pose'].detect(mp_image)
+                    hand_result = analyze_video_mediapipe._landmarkers['hand'].detect(mp_image)
 
                     all_face_results.append(face_result.face_landmarks)
                     all_pose_results.append(pose_result.pose_landmarks)
