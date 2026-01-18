@@ -24,6 +24,13 @@ from config import Config
 
 logger = logging.getLogger(__name__)
 
+# Path to SAVEE dataset for Vocal Tone training
+# Windows path (when running locally on Windows)
+SAVEE_DATASET_PATH_WINDOWS = r"C:\Users\shira\OneDrive\שולחן העבודה\finalProjectFiles\DB for Proj\Savee-Classifier"
+# Linux path (when running inside Docker container)
+SAVEE_DATASET_PATH_LINUX = "/data/dataset/Savee-Classifier"
+# Default - will be determined at runtime
+SAVEE_DATASET_PATH = None
 
 def get_available_models():
     """
@@ -36,6 +43,134 @@ def get_available_models():
     return list(MODEL_REGISTRY.keys())
 
 
+def list_savee_dataset_files(dataset_path: str = None) -> Dict:
+    """
+    List all files in the SAVEE dataset directory for Vocal Tone model training.
+
+    Args:
+        dataset_path: Path to the SAVEE dataset directory. 
+                     If None, uses the default path (detected automatically).
+
+    Returns:
+        Dictionary with file listing results:
+        {
+            'path': str,
+            'exists': bool,
+            'total_files': int,
+            'files': list of file info dicts,
+            'directories': list of subdirectory names,
+            'file_extensions': dict with counts by extension
+        }
+    """
+    global SAVEE_DATASET_PATH
+    
+    if dataset_path is None:
+        # Auto-detect which path to use
+        if SAVEE_DATASET_PATH is None:
+            # Check if running in Docker (Linux path)
+            linux_path = Path(SAVEE_DATASET_PATH_LINUX)
+            if linux_path.exists():
+                SAVEE_DATASET_PATH = SAVEE_DATASET_PATH_LINUX
+            else:
+                # Check Windows path
+                windows_path = Path(SAVEE_DATASET_PATH_WINDOWS)
+                if windows_path.exists():
+                    SAVEE_DATASET_PATH = SAVEE_DATASET_PATH_WINDOWS
+                else:
+                    # Default to Linux path (Docker)
+                    SAVEE_DATASET_PATH = SAVEE_DATASET_PATH_LINUX
+        
+        dataset_path = SAVEE_DATASET_PATH
+    
+    dataset_path_obj = Path(dataset_path)
+    
+    result = {
+        'path': str(dataset_path_obj),
+        'exists': False,
+        'total_files': 0,
+        'files': [],
+        'directories': [],
+        'file_extensions': {},
+        'error': None
+    }
+    
+    try:
+        if not dataset_path_obj.exists():
+            error_msg = f'Dataset path does not exist: {dataset_path}'
+            logger.error(f'[VocalTone] {error_msg}')
+            result['error'] = error_msg
+            return result
+        
+        if not dataset_path_obj.is_dir():
+            error_msg = f'Path is not a directory: {dataset_path}'
+            logger.error(f'[VocalTone] {error_msg}')
+            result['error'] = error_msg
+            return result
+        
+        result['exists'] = True
+        
+        # List all files and directories
+        files_list = []
+        directories_list = []
+        extensions_count = {}
+        
+        for item in dataset_path_obj.iterdir():
+            if item.is_file():
+                file_info = {
+                    'name': item.name,
+                    'path': str(item),
+                    'size_bytes': item.stat().st_size,
+                    'size_mb': round(item.stat().st_size / (1024 * 1024), 2),
+                    'extension': item.suffix.lower()
+                }
+                files_list.append(file_info)
+                
+                # Count extensions
+                ext = item.suffix.lower() or 'no_extension'
+                extensions_count[ext] = extensions_count.get(ext, 0) + 1
+            
+            elif item.is_dir():
+                directories_list.append(item.name)
+        
+        # Sort files by name
+        files_list.sort(key=lambda x: x['name'])
+        directories_list.sort()
+        
+        result['total_files'] = len(files_list)
+        result['files'] = files_list
+        result['directories'] = directories_list
+        result['file_extensions'] = extensions_count
+        
+        # Print to console/logs
+        logger.info(f'[VocalTone] Dataset path: {dataset_path}')
+        logger.info(f'[VocalTone] Total files found: {result["total_files"]}')
+        logger.info(f'[VocalTone] Directories: {len(directories_list)}')
+        logger.info(f'[VocalTone] File extensions: {extensions_count}')
+        
+        if files_list:
+            logger.info('[VocalTone] Sample files (first 10):')
+            for file_info in files_list[:10]:
+                logger.info(f'  - {file_info["name"]} ({file_info["size_mb"]} MB, {file_info["extension"]})')
+            if len(files_list) > 10:
+                logger.info(f'  ... and {len(files_list) - 10} more files')
+        
+        if directories_list:
+            logger.info(f'[VocalTone] Subdirectories: {", ".join(directories_list)}')
+        
+        return result
+        
+    except PermissionError as e:
+        error_msg = f'Permission denied accessing path: {dataset_path}'
+        logger.error(f'[VocalTone] {error_msg}: {e}')
+        result['error'] = error_msg
+        return result
+    except Exception as e:
+        error_msg = f'Error listing dataset files: {str(e)}'
+        logger.error(f'[VocalTone] {error_msg}\n{traceback.format_exc()}')
+        result['error'] = error_msg
+        return result
+
+
 def analyze_audio_whisper(audio_bytes: bytes, session_id: str, chunk_index: int) -> Dict:
     """
     Transcribe audio using Whisper.
@@ -43,7 +178,7 @@ def analyze_audio_whisper(audio_bytes: bytes, session_id: str, chunk_index: int)
     TODO: Integrate actual Whisper model from /test/whisper_test.py
 
     Args:
-        audio_bytes: MP3 audio data
+        audio_bytes: WAV audio data
         session_id: Session identifier
         chunk_index: Chunk index within session
 
@@ -64,7 +199,7 @@ def analyze_audio_whisper(audio_bytes: bytes, session_id: str, chunk_index: int)
         logger.info(f'[Whisper] Start chunk {session_id}:{chunk_index}')
 
         if isinstance(audio_bytes, (bytes, bytearray)):
-            with tempfile.NamedTemporaryFile(suffix='.mp3', delete=False) as tmp_file:
+            with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as tmp_file:
                 tmp_file.write(audio_bytes)
                 temp_path = tmp_file.name
             logger.info(
@@ -568,7 +703,7 @@ def analyze_vocal_tone(audio_bytes: bytes, session_id: str, chunk_index: int) ->
     TODO: Integrate actual vocal tone analysis model
 
     Args:
-        audio_bytes: MP3 audio data
+        audio_bytes: WAV audio data
         session_id: Session identifier
         chunk_index: Chunk index within session
 
@@ -665,7 +800,7 @@ def run_parallel_analysis(
 
     Args:
         video_bytes: MP4 video data
-        audio_bytes: MP3 audio data
+        audio_bytes: WAV audio data
         session_id: Session identifier
         chunk_index: Chunk index within session
         max_workers: Maximum parallel workers (default: None = auto-scale to model count)
