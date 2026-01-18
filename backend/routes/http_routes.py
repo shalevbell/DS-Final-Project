@@ -8,6 +8,7 @@ import logging
 from flask import Flask, jsonify, send_from_directory
 from chunk_processor import ChunkProcessor
 from services.connection_manager import check_postgres_health, check_redis_health
+from run_models import list_savee_dataset_files
 
 logger = logging.getLogger(__name__)
 
@@ -65,6 +66,21 @@ def register_http_routes(app: Flask, chunk_processor: ChunkProcessor, frontend_d
                 'avg_processing_time_ms': stats['avg_processing_time_ms']
             }), 200
         return jsonify({'error': 'Processor not initialized'}), 503
+
+    @app.route('/api/vocal-tone/dataset/list', methods=['GET'])
+    def list_vocal_tone_dataset():
+        """
+        List all files in the SAVEE dataset directory for Vocal Tone model training.
+        
+        Returns:
+            JSON with file listing results including file names, sizes, and extensions.
+        """
+        result = list_savee_dataset_files()
+        
+        if result.get('error'):
+            return jsonify(result), 404
+        
+        return jsonify(result), 200
 
     @app.route('/')
     def index():

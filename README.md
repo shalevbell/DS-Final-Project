@@ -39,7 +39,7 @@ docker-compose down
 ```
 Frontend (WebRTC)
   → 30s chunks via WebSocket
-    → Backend (FFmpeg → MP4/MP3)
+    → Backend (FFmpeg → MP4/WAV)
       → Redis PUBSUB
         → Chunk Processor (parallel ML analysis)
           → Results stored in Redis
@@ -49,7 +49,7 @@ Frontend (WebRTC)
 
 - **Frontend**: HTML/CSS/JavaScript with WebRTC camera capture
 - **Backend**: Flask + SocketIO + eventlet
-- **Video Processing**: FFmpeg (MP4/MP3 conversion)
+- **Video Processing**: FFmpeg (MP4/WAV conversion)
 - **ML Models**: Whisper, MediaPipe, Vocal Tone (placeholders for now)
 - **Database**: PostgreSQL
 - **Cache/Queue**: Redis (with PUBSUB)
@@ -93,7 +93,7 @@ Frontend (WebRTC)
 
 1. **Frontend** records 30-second video/audio chunks
 2. **WebSocket** sends chunks to backend
-3. **FFmpeg** converts to MP4 (video) + MP3 (audio)
+3. **FFmpeg** converts to MP4 (video) + WAV (audio)
 4. **Redis** stores chunks and publishes PUBSUB notification
 5. **ChunkProcessor** picks up notification from queue
 6. **ML Models** run in parallel (ThreadPoolExecutor):
