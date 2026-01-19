@@ -14,7 +14,7 @@ services:
     volumes:
       - ./backend:/app
       - ./frontend:/frontend
-      - "C:/Users/shira/OneDrive/שולחן העבודה/finalProjectFiles/DB for Proj:/data/dataset:ro"
+      - "C:/Users/shira/OneDrive/שולחן העבודה/finalProjectFiles/DB for Proj/Savee-Classifier:/data/dataset:ro"
     depends_on:
       postgres:
         condition: service_healthy

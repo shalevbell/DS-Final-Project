@@ -11,3 +11,7 @@ faster-whisper
 mediapipe==0.10.14
 opencv-python-headless
 numpy
+librosa
+soundfile
+scikit-learn
+joblib

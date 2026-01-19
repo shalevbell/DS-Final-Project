@@ -19,6 +19,8 @@ import cv2
 import mediapipe as mp
 import numpy as np
 from faster_whisper import WhisperModel
+import librosa
+import soundfile as sf
 
 from config import Config
 
@@ -28,7 +30,8 @@ logger = logging.getLogger(__name__)
 # Windows path (when running locally on Windows)
 SAVEE_DATASET_PATH_WINDOWS = r"C:\Users\shira\OneDrive\שולחן העבודה\finalProjectFiles\DB for Proj\Savee-Classifier"
 # Linux path (when running inside Docker container)
-SAVEE_DATASET_PATH_LINUX = "/data/dataset/Savee-Classifier"
+# Note: docker-compose maps the parent directory, so we need to go into Savee-Classifier
+SAVEE_DATASET_PATH_LINUX = "/data/dataset"
 # Default - will be determined at runtime
 SAVEE_DATASET_PATH = None
 
@@ -169,6 +172,174 @@ def list_savee_dataset_files(dataset_path: str = None) -> Dict:
         logger.error(f'[VocalTone] {error_msg}\n{traceback.format_exc()}')
         result['error'] = error_msg
         return result
+
+
+def process_savee_dataset_for_training(
+    dataset_path: str = None,
+    target_sr: int = 16000,
+    target_duration_sec: float = 3.0,
+    n_mfcc: int = 40,
+    show_progress: bool = True
+) -> tuple:
+    """
+    Process all WAV files in SAVEE dataset for Vocal Tone model training.
+    
+    For each WAV file:
+    - Load audio waveform
+    - Normalize format: mono + 16kHz + light normalization
+    - Fix length: crop or pad to target_duration_sec (default 3 seconds)
+    - Extract MFCC features (n_mfcc × frames matrix)
+    - Convert to fixed vector: mean + std for each MFCC coefficient → vector of length 80
+    
+    Args:
+        dataset_path: Path to Savee-Classifier directory. If None, uses default path.
+        target_sr: Target sample rate (default: 16000 Hz)
+        target_duration_sec: Target duration in seconds (default: 3.0)
+        n_mfcc: Number of MFCC coefficients to extract (default: 40)
+        show_progress: Whether to print progress messages
+    
+    Returns:
+        Tuple of (X, y, labels_map) where:
+        - X: numpy array of shape (#samples, #features) where #features = n_mfcc * 2 (mean + std)
+        - y: numpy array of shape (#samples,) with label indices
+        - labels_map: dict mapping label index to label name (directory name)
+    """
+    global SAVEE_DATASET_PATH
+    
+    if dataset_path is None:
+        # Auto-detect path
+        if SAVEE_DATASET_PATH is None:
+            linux_path = Path(SAVEE_DATASET_PATH_LINUX)
+            if linux_path.exists():
+                SAVEE_DATASET_PATH = SAVEE_DATASET_PATH_LINUX
+            else:
+                windows_path = Path(SAVEE_DATASET_PATH_WINDOWS)
+                if windows_path.exists():
+                    SAVEE_DATASET_PATH = SAVEE_DATASET_PATH_WINDOWS
+                else:
+                    SAVEE_DATASET_PATH = SAVEE_DATASET_PATH_LINUX
+        dataset_path = SAVEE_DATASET_PATH
+    
+    dataset_path_obj = Path(dataset_path)
+    
+    if not dataset_path_obj.exists():
+        raise ValueError(f'Dataset path does not exist: {dataset_path}')
+    
+    if not dataset_path_obj.is_dir():
+        raise ValueError(f'Path is not a directory: {dataset_path}')
+    
+    # Find all WAV files organized by subdirectory (each subdirectory is a label)
+    wav_files = []
+    labels_list = []
+    
+    if show_progress:
+        logger.info(f'[VocalTone] Scanning dataset: {dataset_path}')
+    
+    # Get all subdirectories (each is a label/class)
+    subdirs = [d for d in dataset_path_obj.iterdir() if d.is_dir()]
+    subdirs.sort()
+    
+    labels_map = {}
+    label_to_idx = {}
+    
+    for subdir in subdirs:
+        label_name = subdir.name
+        if label_name not in label_to_idx:
+            idx = len(label_to_idx)
+            label_to_idx[label_name] = idx
+            labels_map[idx] = label_name
+        
+        # Find all WAV files in this subdirectory
+        wav_files_in_dir = list(subdir.glob('*.wav')) + list(subdir.glob('*.WAV'))
+        
+        for wav_file in wav_files_in_dir:
+            wav_files.append(wav_file)
+            labels_list.append(label_to_idx[label_name])
+    
+    if len(wav_files) == 0:
+        raise ValueError(f'No WAV files found in dataset: {dataset_path}')
+    
+    if show_progress:
+        logger.info(f'[VocalTone] Found {len(wav_files)} WAV files in {len(label_to_idx)} classes')
+        logger.info(f'[VocalTone] Classes: {list(label_to_idx.keys())}')
+    
+    # Process each WAV file
+    features_list = []
+    valid_labels = []
+    
+    target_samples = int(target_duration_sec * target_sr)
+    
+    for i, (wav_path, label_idx) in enumerate(zip(wav_files, labels_list)):
+        try:
+            if show_progress and (i + 1) % 50 == 0:
+                logger.info(f'[VocalTone] Processing: {i + 1}/{len(wav_files)} files')
+            
+            # Load audio (force mono)
+            audio, sr = librosa.load(str(wav_path), sr=None, mono=True)
+            
+            # Resample to target sample rate if needed
+            if sr != target_sr:
+                audio = librosa.resample(audio, orig_sr=sr, target_sr=target_sr)
+            
+            # Light normalization (divide by max absolute value, cap at 0.95 to avoid clipping)
+            max_val = np.abs(audio).max()
+            if max_val > 0:
+                audio = audio / max_val * 0.95
+            
+            # Fix length: crop or pad to target_duration_sec
+            current_samples = len(audio)
+            if current_samples > target_samples:
+                # Crop: take first target_samples
+                audio = audio[:target_samples]
+            elif current_samples < target_samples:
+                # Pad: zero-padding at the end
+                audio = np.pad(audio, (0, target_samples - current_samples), mode='constant')
+            
+            # Extract MFCC features
+            # n_mfcc=40 gives us 40 coefficients × frames
+            mfccs = librosa.feature.mfcc(
+                y=audio,
+                sr=target_sr,
+                n_mfcc=n_mfcc,
+                n_fft=2048,
+                hop_length=512,
+                n_mels=128
+            )
+            
+            # Convert to fixed vector: mean + std for each MFCC coefficient
+            # Shape: (n_mfcc, frames) → (n_mfcc * 2,) = (80,)
+            mfcc_mean = np.mean(mfccs, axis=1)  # Mean across time for each coefficient
+            mfcc_std = np.std(mfccs, axis=1)    # Std across time for each coefficient
+            
+            # Concatenate mean and std → vector of length 80
+            feature_vector = np.concatenate([mfcc_mean, mfcc_std])
+            
+            features_list.append(feature_vector)
+            valid_labels.append(label_idx)
+            
+        except Exception as e:
+            logger.warning(f'[VocalTone] Error processing {wav_path.name}: {e}')
+            continue
+    
+    if len(features_list) == 0:
+        raise ValueError('No valid audio files processed')
+    
+    # Convert to numpy arrays
+    X = np.array(features_list)  # Shape: (#samples, 80)
+    y = np.array(valid_labels)   # Shape: (#samples,)
+    
+    if show_progress:
+        logger.info(f'[VocalTone] Processing complete!')
+        logger.info(f'[VocalTone] X shape: {X.shape} (#samples, #features)')
+        logger.info(f'[VocalTone] y shape: {y.shape} (#samples,)')
+        logger.info(f'[VocalTone] Features per sample: {X.shape[1]} (should be {n_mfcc * 2})')
+        logger.info(f'[VocalTone] Number of classes: {len(labels_map)}')
+        logger.info(f'[VocalTone] Samples per class:')
+        for label_idx, label_name in labels_map.items():
+            count = np.sum(y == label_idx)
+            logger.info(f'  {label_name}: {count} samples')
+    
+    return X, y, labels_map
 
 
 def analyze_audio_whisper(audio_bytes: bytes, session_id: str, chunk_index: int) -> Dict:
