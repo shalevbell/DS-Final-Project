@@ -16,3 +16,4 @@ soundfile
 scikit-learn
 scipy
 joblib
+gdown>=4.7.0

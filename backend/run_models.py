@@ -71,18 +71,25 @@ def list_savee_dataset_files(dataset_path: str = None) -> Dict:
     if dataset_path is None:
         # Auto-detect which path to use
         if SAVEE_DATASET_PATH is None:
-            # Check if running in Docker (Linux path)
-            linux_path = Path(SAVEE_DATASET_PATH_LINUX)
-            if linux_path.exists():
-                SAVEE_DATASET_PATH = SAVEE_DATASET_PATH_LINUX
-            else:
-                # Check Windows path
-                windows_path = Path(SAVEE_DATASET_PATH_WINDOWS)
-                if windows_path.exists():
-                    SAVEE_DATASET_PATH = SAVEE_DATASET_PATH_WINDOWS
+            # 1) Env SAVEE_DATASET_PATH (for local runs: set to your dataset folder)
+            if Config.SAVEE_DATASET_PATH:
+                p = Path(Config.SAVEE_DATASET_PATH)
+                if p.exists():
+                    SAVEE_DATASET_PATH = str(p.resolve())
                 else:
-                    # Default to Linux path (Docker)
+                    SAVEE_DATASET_PATH = Config.SAVEE_DATASET_PATH
+            if SAVEE_DATASET_PATH is None:
+                # 2) Docker path
+                linux_path = Path(SAVEE_DATASET_PATH_LINUX)
+                if linux_path.exists():
                     SAVEE_DATASET_PATH = SAVEE_DATASET_PATH_LINUX
+                else:
+                    # 3) Fallback Windows path
+                    windows_path = Path(SAVEE_DATASET_PATH_WINDOWS)
+                    if windows_path.exists():
+                        SAVEE_DATASET_PATH = SAVEE_DATASET_PATH_WINDOWS
+                    else:
+                        SAVEE_DATASET_PATH = SAVEE_DATASET_PATH_LINUX
         
         dataset_path = SAVEE_DATASET_PATH
     
@@ -334,17 +341,24 @@ def process_savee_dataset_for_training(
     global SAVEE_DATASET_PATH
     
     if dataset_path is None:
-        # Auto-detect path
+        # Auto-detect path (same logic as list_savee_dataset_files)
         if SAVEE_DATASET_PATH is None:
-            linux_path = Path(SAVEE_DATASET_PATH_LINUX)
-            if linux_path.exists():
-                SAVEE_DATASET_PATH = SAVEE_DATASET_PATH_LINUX
-            else:
-                windows_path = Path(SAVEE_DATASET_PATH_WINDOWS)
-                if windows_path.exists():
-                    SAVEE_DATASET_PATH = SAVEE_DATASET_PATH_WINDOWS
+            if Config.SAVEE_DATASET_PATH:
+                p = Path(Config.SAVEE_DATASET_PATH)
+                if p.exists():
+                    SAVEE_DATASET_PATH = str(p.resolve())
                 else:
+                    SAVEE_DATASET_PATH = Config.SAVEE_DATASET_PATH
+            if SAVEE_DATASET_PATH is None:
+                linux_path = Path(SAVEE_DATASET_PATH_LINUX)
+                if linux_path.exists():
                     SAVEE_DATASET_PATH = SAVEE_DATASET_PATH_LINUX
+                else:
+                    windows_path = Path(SAVEE_DATASET_PATH_WINDOWS)
+                    if windows_path.exists():
+                        SAVEE_DATASET_PATH = SAVEE_DATASET_PATH_WINDOWS
+                    else:
+                        SAVEE_DATASET_PATH = SAVEE_DATASET_PATH_LINUX
         dataset_path = SAVEE_DATASET_PATH
     
     dataset_path_obj = Path(dataset_path)
@@ -1070,9 +1084,12 @@ def analyze_vocal_tone(audio_bytes: bytes, session_id: str, chunk_index: int) ->
         if not hasattr(analyze_vocal_tone, '_model'):
             logger.info('[VocalTone] Loading model files (first use)...')
             
-            # Determine backend directory path
-            backend_dir = Path(__file__).parent
-            models_dir = backend_dir / 'models' / 'vocal_tone'
+            # Use VOCAL_TONE_MODEL_DIR if set, else default backend/models/vocal_tone
+            if Config.VOCAL_TONE_MODEL_DIR:
+                models_dir = Path(Config.VOCAL_TONE_MODEL_DIR)
+            else:
+                backend_dir = Path(__file__).parent
+                models_dir = backend_dir / 'models' / 'vocal_tone'
             model_path = models_dir / 'vocal_tone_model.pkl'
             scaler_path = models_dir / 'vocal_tone_scaler.pkl'
             labels_path = models_dir / 'vocal_tone_labels.pkl'

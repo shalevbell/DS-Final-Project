@@ -458,5 +458,8 @@ def main():
 
 
 if __name__ == '__main__':
-    model, scaler, labels, results = main()
+    result = main()
+    if result is None:
+        raise SystemExit(1)
+    model, scaler, labels, results = result
 

@@ -35,8 +35,14 @@ RUN --mount=type=cache,target=/root/.cache/huggingface \
 # Copy application code (this layer changes most frequently)
 COPY . .
 
+# Entrypoint: copy to / so it is NOT overwritten by the ./backend:/app volume (avoids CRLF issues on Windows)
+COPY entrypoint.sh /entrypoint.sh
+RUN sed -i 's/\r$//' /entrypoint.sh && chmod +x /entrypoint.sh
+RUN mkdir -p /data/dataset
+
 # Expose port
 EXPOSE 5000
 
+ENTRYPOINT ["/entrypoint.sh"]
 # Run with gunicorn using eventlet worker for SocketIO support
 CMD ["gunicorn", "--bind", "0.0.0.0:5000", "--worker-class", "eventlet", "--workers", "1", "--timeout", "120", "--worker-connections", "1000", "app:app"]
