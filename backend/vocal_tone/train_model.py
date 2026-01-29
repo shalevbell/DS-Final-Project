@@ -14,7 +14,7 @@ import os
 from pathlib import Path
 import numpy as np
 import joblib
-from sklearn.model_selection import train_test_split
+from sklearn.model_selection import train_test_split, RandomizedSearchCV
 from sklearn.preprocessing import StandardScaler
 from sklearn.svm import SVC
 from sklearn.ensemble import RandomForestClassifier
@@ -25,6 +25,7 @@ from sklearn.metrics import (
     confusion_matrix,
     f1_score
 )
+from scipy.stats import uniform, randint
 
 # Add parent directory (backend) to path
 backend_dir = Path(__file__).parent.parent
@@ -33,9 +34,12 @@ sys.path.insert(0, str(backend_dir))
 from run_models import process_savee_dataset_for_training
 
 
-def train_models(X_train, X_val, y_train, y_val):
+def train_models(X_train, X_val, y_train, y_val, use_hyperparameter_tuning=True):
     """
-    Train multiple models and return their performances.
+    Train multiple models with hyperparameter tuning and return their performances.
+    
+    Args:
+        use_hyperparameter_tuning: Whether to use RandomizedSearchCV for tuning (default: True)
     
     Returns:
         List of tuples: (model_name, model, accuracy, f1_score)
@@ -44,20 +48,47 @@ def train_models(X_train, X_val, y_train, y_val):
     results = []
     
     print("\n" + "=" * 80)
-    print("Training Models")
+    print("Training Models with Hyperparameter Tuning" if use_hyperparameter_tuning else "Training Models")
     print("=" * 80)
     
-    # 1. SVM with RBF kernel (with regularization and class weights)
-    print("\n1. Training SVM (RBF kernel) with regularization...")
-    svm_model = SVC(
-        kernel='rbf',
-        C=0.5,  # Lower C = more regularization (prevents overfitting)
-        gamma='scale',
-        probability=True,
-        class_weight='balanced',  # Handle imbalanced data
-        random_state=42
-    )
-    svm_model.fit(X_train, y_train)
+    # 1. SVM with RBF kernel (with hyperparameter tuning)
+    print("\n1. Training SVM (RBF kernel) with hyperparameter tuning...")
+    if use_hyperparameter_tuning:
+        svm_param_dist = {
+            'C': uniform(0.1, 2.0),  # 0.1 to 2.1
+            'gamma': ['scale', 'auto', 0.001, 0.01, 0.1, 1.0]
+        }
+        svm_base = SVC(
+            kernel='rbf',
+            probability=True,
+            class_weight='balanced',
+            random_state=42
+        )
+        svm_search = RandomizedSearchCV(
+            svm_base,
+            svm_param_dist,
+            n_iter=20,  # Try 20 random combinations
+            cv=3,  # 3-fold cross-validation
+            scoring='f1_weighted',
+            n_jobs=-1,
+            random_state=42,
+            verbose=1
+        )
+        svm_search.fit(X_train, y_train)
+        svm_model = svm_search.best_estimator_
+        print(f"   🔧 Best params: {svm_search.best_params_}")
+        print(f"   📊 Best CV score: {svm_search.best_score_:.4f}")
+    else:
+        svm_model = SVC(
+            kernel='rbf',
+            C=0.5,
+            gamma='scale',
+            probability=True,
+            class_weight='balanced',
+            random_state=42
+        )
+        svm_model.fit(X_train, y_train)
+    
     svm_pred = svm_model.predict(X_val)
     svm_accuracy = accuracy_score(y_val, svm_pred)
     svm_f1 = f1_score(y_val, svm_pred, average='weighted')
@@ -65,16 +96,42 @@ def train_models(X_train, X_val, y_train, y_val):
     results.append(('SVM_RBF', svm_model, svm_accuracy, svm_f1))
     print(f"   ✅ SVM Accuracy: {svm_accuracy:.4f}, F1: {svm_f1:.4f}")
     
-    # 2. SVM with Linear kernel (with regularization and class weights)
-    print("\n2. Training SVM (Linear kernel) with regularization...")
-    svm_linear = SVC(
-        kernel='linear',
-        C=0.5,  # Lower C = more regularization
-        probability=True,
-        class_weight='balanced',  # Handle imbalanced data
-        random_state=42
-    )
-    svm_linear.fit(X_train, y_train)
+    # 2. SVM with Linear kernel (with hyperparameter tuning)
+    print("\n2. Training SVM (Linear kernel) with hyperparameter tuning...")
+    if use_hyperparameter_tuning:
+        svm_linear_param_dist = {
+            'C': uniform(0.1, 2.0)  # 0.1 to 2.1
+        }
+        svm_linear_base = SVC(
+            kernel='linear',
+            probability=True,
+            class_weight='balanced',
+            random_state=42
+        )
+        svm_linear_search = RandomizedSearchCV(
+            svm_linear_base,
+            svm_linear_param_dist,
+            n_iter=15,
+            cv=3,
+            scoring='f1_weighted',
+            n_jobs=-1,
+            random_state=42,
+            verbose=1
+        )
+        svm_linear_search.fit(X_train, y_train)
+        svm_linear = svm_linear_search.best_estimator_
+        print(f"   🔧 Best params: {svm_linear_search.best_params_}")
+        print(f"   📊 Best CV score: {svm_linear_search.best_score_:.4f}")
+    else:
+        svm_linear = SVC(
+            kernel='linear',
+            C=0.5,
+            probability=True,
+            class_weight='balanced',
+            random_state=42
+        )
+        svm_linear.fit(X_train, y_train)
+    
     svm_linear_pred = svm_linear.predict(X_val)
     svm_linear_accuracy = accuracy_score(y_val, svm_linear_pred)
     svm_linear_f1 = f1_score(y_val, svm_linear_pred, average='weighted')
@@ -82,18 +139,46 @@ def train_models(X_train, X_val, y_train, y_val):
     results.append(('SVM_Linear', svm_linear, svm_linear_accuracy, svm_linear_f1))
     print(f"   ✅ SVM Linear Accuracy: {svm_linear_accuracy:.4f}, F1: {svm_linear_f1:.4f}")
     
-    # 3. Random Forest (with regularization and class weights)
-    print("\n3. Training Random Forest with regularization...")
-    rf_model = RandomForestClassifier(
-        n_estimators=200,  # More trees for better generalization
-        max_depth=15,      # Less depth = more regularization
-        min_samples_split=5,  # More regularization
-        min_samples_leaf=2,
-        class_weight='balanced',  # Handle imbalanced data
-        random_state=42,
-        n_jobs=-1
-    )
-    rf_model.fit(X_train, y_train)
+    # 3. Random Forest (with hyperparameter tuning)
+    print("\n3. Training Random Forest with hyperparameter tuning...")
+    if use_hyperparameter_tuning:
+        rf_param_dist = {
+            'n_estimators': randint(100, 300),  # 100 to 299
+            'max_depth': [10, 15, 20, 25, None],
+            'min_samples_split': [2, 5, 10],
+            'min_samples_leaf': [1, 2, 4]
+        }
+        rf_base = RandomForestClassifier(
+            class_weight='balanced',
+            random_state=42,
+            n_jobs=-1
+        )
+        rf_search = RandomizedSearchCV(
+            rf_base,
+            rf_param_dist,
+            n_iter=20,
+            cv=3,
+            scoring='f1_weighted',
+            n_jobs=-1,
+            random_state=42,
+            verbose=1
+        )
+        rf_search.fit(X_train, y_train)
+        rf_model = rf_search.best_estimator_
+        print(f"   🔧 Best params: {rf_search.best_params_}")
+        print(f"   📊 Best CV score: {rf_search.best_score_:.4f}")
+    else:
+        rf_model = RandomForestClassifier(
+            n_estimators=200,
+            max_depth=15,
+            min_samples_split=5,
+            min_samples_leaf=2,
+            class_weight='balanced',
+            random_state=42,
+            n_jobs=-1
+        )
+        rf_model.fit(X_train, y_train)
+    
     rf_pred = rf_model.predict(X_val)
     rf_accuracy = accuracy_score(y_val, rf_pred)
     rf_f1 = f1_score(y_val, rf_pred, average='weighted')
@@ -101,18 +186,47 @@ def train_models(X_train, X_val, y_train, y_val):
     results.append(('RandomForest', rf_model, rf_accuracy, rf_f1))
     print(f"   ✅ Random Forest Accuracy: {rf_accuracy:.4f}, F1: {rf_f1:.4f}")
     
-    # 4. Neural Network (MLP) (with regularization)
-    print("\n4. Training Neural Network (MLP) with regularization...")
-    mlp_model = MLPClassifier(
-        hidden_layer_sizes=(256, 128, 64),  # Deeper network
-        max_iter=1000,
-        alpha=0.01,  # L2 regularization (prevents overfitting)
-        learning_rate='adaptive',
-        early_stopping=True,
-        validation_fraction=0.1,
-        random_state=42
-    )
-    mlp_model.fit(X_train, y_train)
+    # 4. Neural Network (MLP) (with hyperparameter tuning)
+    print("\n4. Training Neural Network (MLP) with hyperparameter tuning...")
+    if use_hyperparameter_tuning:
+        mlp_param_dist = {
+            'hidden_layer_sizes': [(128, 64), (256, 128), (256, 128, 64), (512, 256)],
+            'alpha': uniform(0.0001, 0.1),  # 0.0001 to 0.1001
+            'learning_rate_init': uniform(0.0001, 0.01)  # 0.0001 to 0.0101
+        }
+        mlp_base = MLPClassifier(
+            max_iter=1000,
+            learning_rate='adaptive',
+            early_stopping=True,
+            validation_fraction=0.1,
+            random_state=42
+        )
+        mlp_search = RandomizedSearchCV(
+            mlp_base,
+            mlp_param_dist,
+            n_iter=15,
+            cv=3,
+            scoring='f1_weighted',
+            n_jobs=-1,
+            random_state=42,
+            verbose=1
+        )
+        mlp_search.fit(X_train, y_train)
+        mlp_model = mlp_search.best_estimator_
+        print(f"   🔧 Best params: {mlp_search.best_params_}")
+        print(f"   📊 Best CV score: {mlp_search.best_score_:.4f}")
+    else:
+        mlp_model = MLPClassifier(
+            hidden_layer_sizes=(256, 128, 64),
+            max_iter=1000,
+            alpha=0.01,
+            learning_rate='adaptive',
+            early_stopping=True,
+            validation_fraction=0.1,
+            random_state=42
+        )
+        mlp_model.fit(X_train, y_train)
+    
     mlp_pred = mlp_model.predict(X_val)
     mlp_accuracy = accuracy_score(y_val, mlp_pred)
     mlp_f1 = f1_score(y_val, mlp_pred, average='weighted')
@@ -173,13 +287,17 @@ def main():
     
     # Step 1: Load and process dataset
     print("Step 1: Loading and processing dataset...")
+    print("   Using extended features: MFCC + Chroma + Spectral (107 features)")
+    print("   Using data augmentation: Yes (time_stretch, pitch_shift, noise, time_shift)")
     try:
         X, y, labels_map = process_savee_dataset_for_training(
             dataset_path=None,
             target_sr=16000,
             target_duration_sec=3.0,
             n_mfcc=40,
-            show_progress=True
+            show_progress=True,
+            use_augmentation=True,
+            augmentation_factor=2  # Creates 2 augmented versions per original file
         )
         print(f"\n✅ Dataset loaded: {X.shape[0]} samples, {X.shape[1]} features")
         print(f"✅ Classes: {len(labels_map)} - {list(labels_map.values())}")

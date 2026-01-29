@@ -25,6 +25,13 @@ COPY requirements.txt .
 RUN --mount=type=cache,target=/root/.cache/pip \
     pip install --no-cache-dir -r requirements.txt
 
+# Pre-download Whisper model during build (so it's available offline)
+# This prevents SSL/connection errors at runtime
+# Cache the HuggingFace cache directory so model persists across builds
+RUN --mount=type=cache,target=/root/.cache/huggingface \
+    python -c "from faster_whisper import WhisperModel; import sys; print('Downloading Whisper model...', flush=True); model = WhisperModel('base.en', device='cpu', compute_type='int8'); print('Whisper model downloaded successfully', flush=True); sys.exit(0)" || \
+    (echo "Warning: Failed to download Whisper model during build. Will try at runtime." && exit 0)
+
 # Copy application code (this layer changes most frequently)
 COPY . .
 

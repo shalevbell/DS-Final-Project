@@ -102,10 +102,13 @@ def main():
     # Test prediction with dummy data
     print("Step 6: Testing Model Prediction")
     print("=" * 80)
-    print("Creating dummy feature vector (80 features, like real audio)...")
+    
+    # Check how many features the scaler expects
+    expected_features = len(scaler.mean_) if hasattr(scaler, 'mean_') else 107
+    print(f"Creating dummy feature vector ({expected_features} features, like real audio)...")
     
     # Create dummy features (simulating processed audio)
-    dummy_features = np.random.randn(80)  # Random features
+    dummy_features = np.random.randn(expected_features)  # Random features
     print(f"Input shape: {dummy_features.shape}")
     
     # Scale features
@@ -139,8 +142,8 @@ model = joblib.load('models/vocal_tone/vocal_tone_model.pkl')
 scaler = joblib.load('models/vocal_tone/vocal_tone_scaler.pkl')
 labels = joblib.load('models/vocal_tone/vocal_tone_labels.pkl')
 
-# Process audio → get 80 features (like in process_savee_dataset_for_training)
-features = extract_features_from_audio(audio_bytes)  # returns 80 features
+# Process audio → get 107 features (like in process_savee_dataset_for_training)
+features = extract_features_from_audio(audio_bytes)  # returns 107 features (extended)
 
 # Scale
 features_scaled = scaler.transform([features])

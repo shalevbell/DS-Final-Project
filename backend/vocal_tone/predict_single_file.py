@@ -15,6 +15,8 @@ import argparse
 backend_dir = Path(__file__).parent.parent
 sys.path.insert(0, str(backend_dir))
 
+from run_models import extract_extended_features
+
 
 def process_single_audio_file(
     audio_path: str,
@@ -32,7 +34,7 @@ def process_single_audio_file(
         n_mfcc: Number of MFCC coefficients (default: 40)
     
     Returns:
-        Feature vector of length 80 (40 mean + 40 std)
+        Feature vector of length 107 (MFCC + Chroma + Spectral features)
     """
     audio_path_obj = Path(audio_path)
     
@@ -74,25 +76,10 @@ def process_single_audio_file(
     else:
         print(f"   ✅ Already correct length: {target_samples} samples ({target_duration_sec}s)")
     
-    # Extract MFCC features
-    print(f"   🎵 Extracting MFCC features...")
-    mfccs = librosa.feature.mfcc(
-        y=audio,
-        sr=target_sr,
-        n_mfcc=n_mfcc,
-        n_fft=2048,
-        hop_length=512,
-        n_mels=128
-    )
-    print(f"   ✅ MFCC shape: {mfccs.shape} (40 coefficients × {mfccs.shape[1]} frames)")
-    
-    # Convert to fixed vector: mean + std for each MFCC coefficient
-    mfcc_mean = np.mean(mfccs, axis=1)  # Mean across time for each coefficient
-    mfcc_std = np.std(mfccs, axis=1)    # Std across time for each coefficient
-    
-    # Concatenate mean and std → vector of length 80
-    feature_vector = np.concatenate([mfcc_mean, mfcc_std])
-    print(f"   ✅ Feature vector created: shape {feature_vector.shape} (40 mean + 40 std)")
+    # Extract extended features (MFCC + Chroma + Spectral)
+    print(f"   🎵 Extracting extended features (MFCC + Chroma + Spectral)...")
+    feature_vector = extract_extended_features(audio, target_sr, n_mfcc)
+    print(f"   ✅ Feature vector created: shape {feature_vector.shape} (107 features: MFCC + Chroma + Spectral)")
     
     return feature_vector
 

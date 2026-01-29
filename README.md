@@ -4,6 +4,25 @@ AI-powered interview assistant with real-time video analysis.
 
 ## Quick Start
 
+### First Time Setup
+
+```bash
+# 1. Clone the repository
+git clone <repository-url>
+cd DS-Final-Project
+
+# 2. Build and start all services (this will download Whisper model during build)
+docker-compose up -d --build
+
+# 3. If Whisper model download failed during build, download it manually:
+docker-compose exec backend python -c 'from faster_whisper import WhisperModel; print("Downloading Whisper model..."); WhisperModel("base.en", device="cpu", compute_type="int8"); print("Model downloaded successfully")'
+
+# 4. Verify everything is working
+docker-compose logs -f backend
+```
+
+### Regular Usage
+
 ```bash
 # Start all services
 docker-compose up -d
@@ -17,6 +36,20 @@ docker-compose logs -f backend
 # Stop services
 docker-compose down
 ```
+
+### Troubleshooting
+
+**If Whisper fails to load:**
+- The model should download automatically during build
+- If it fails, run the manual download command above
+- Make sure you have internet connection during first build/run
+
+**Note for VocalTone dataset:**
+- The dataset path in `docker-compose.yml` is Windows-specific
+- On Linux/Mac, update the volume path to your dataset location:
+  ```yaml
+  - "/path/to/your/Savee-Classifier:/data/dataset:ro"
+  ```
 
 ## What It Does
 
@@ -50,7 +83,7 @@ Frontend (WebRTC)
 - **Frontend**: HTML/CSS/JavaScript with WebRTC camera capture
 - **Backend**: Flask + SocketIO + eventlet
 - **Video Processing**: FFmpeg (MP4/WAV conversion)
-- **ML Models**: Whisper, MediaPipe, Vocal Tone (placeholders for now)
+- **ML Models**: Whisper (speech transcription), MediaPipe (video analysis), Vocal Tone (emotion detection)
 - **Database**: PostgreSQL
 - **Cache/Queue**: Redis (with PUBSUB)
 - **Deployment**: Docker Compose

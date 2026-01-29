@@ -14,7 +14,10 @@ services:
     volumes:
       - ./backend:/app
       - ./frontend:/frontend
+      # NOTE: Update this path to your local dataset location (Windows/Linux/Mac)
       - "C:/Users/shira/OneDrive/שולחן העבודה/finalProjectFiles/DB for Proj/Savee-Classifier:/data/dataset:ro"
+      # Persist Whisper model cache between container restarts
+      - whisper_cache:/root/.cache/huggingface
     depends_on:
       postgres:
         condition: service_healthy
@@ -56,3 +59,4 @@ services:
 volumes:
   postgres_data:
   redis_data:
+  whisper_cache:
