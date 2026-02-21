@@ -1174,9 +1174,13 @@ def analyze_vocal_tone(audio_bytes: bytes, session_id: str, chunk_index: int) ->
         pitch_mean = float(np.mean(pitch_values)) if pitch_values else 0.0
         pitch_std = float(np.std(pitch_values)) if pitch_values else 0.0
 
-        # Tempo
+        # Tempo (may be scalar or array depending on librosa version)
         tempo, _ = librosa.beat.beat_track(y=audio, sr=target_sr)
-        tempo_value = float(tempo) if tempo is not None else 0.0
+        if tempo is None:
+            tempo_value = 0.0
+        else:
+            t = np.atleast_1d(tempo).flat[0]
+            tempo_value = float(t)
 
         # Energy level
         energy = float(np.mean(librosa.feature.rms(y=audio)[0]))
