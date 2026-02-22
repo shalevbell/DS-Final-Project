@@ -32,14 +32,14 @@ def main():
     print("=" * 80)
     
     if result.get('error'):
-        print(f"❌ ERROR: {result['error']}")
+        print(f"ERROR: {result['error']}")
         print(f"Path checked: {result['path']}")
         return
     
-    print(f"✅ Path: {result['path']}")
-    print(f"✅ Exists: {result['exists']}")
-    print(f"✅ Total files: {result['total_files']}")
-    print(f"✅ Directories: {len(result['directories'])}")
+    print(f"Path: {result['path']}")
+    print(f"Exists: {result['exists']}")
+    print(f"Total files: {result['total_files']}")
+    print(f"Directories: {len(result['directories'])}")
     print()
     
     # Print file extensions summary
@@ -53,7 +53,7 @@ def main():
     if result['directories']:
         print("Subdirectories:")
         for directory in result['directories']:
-            print(f"  📁 {directory}")
+            print(f"  {directory}")
         print()
     
     # Print files (first 20)

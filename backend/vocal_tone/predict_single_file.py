@@ -42,24 +42,24 @@ def process_single_audio_file(
         raise ValueError(f'Audio file not found: {audio_path}')
     
     if not audio_path_obj.suffix.lower() in ['.wav', '.mp3', '.m4a', '.flac']:
-        print(f"⚠️  Warning: File extension is {audio_path_obj.suffix}, but processing anyway...")
+        print(f"Warning: File extension is {audio_path_obj.suffix}, but processing anyway...")
     
-    print(f"📁 Loading audio file: {audio_path}")
+    print(f"Loading audio file: {audio_path}")
     
     # Load audio (force mono)
     audio, sr = librosa.load(str(audio_path), sr=None, mono=True)
-    print(f"   ✅ Loaded: {len(audio)} samples at {sr}Hz ({len(audio)/sr:.2f} seconds)")
+    print(f"   Loaded: {len(audio)} samples at {sr}Hz ({len(audio)/sr:.2f} seconds)")
     
     # Resample to target sample rate if needed
     if sr != target_sr:
-        print(f"   🔄 Resampling from {sr}Hz to {target_sr}Hz...")
+        print(f"   Resampling from {sr}Hz to {target_sr}Hz...")
         audio = librosa.resample(audio, orig_sr=sr, target_sr=target_sr)
     
     # Light normalization
     max_val = np.abs(audio).max()
     if max_val > 0:
         audio = audio / max_val * 0.95
-        print(f"   ✅ Normalized: max={np.abs(audio).max():.3f}")
+        print(f"   Normalized: max={np.abs(audio).max():.3f}")
     
     # Fix length: crop or pad to target_duration_sec
     target_samples = int(target_duration_sec * target_sr)
@@ -68,18 +68,18 @@ def process_single_audio_file(
     if current_samples > target_samples:
         # Crop: take first target_samples
         audio = audio[:target_samples]
-        print(f"   ✂️  Cropped to {target_samples} samples ({target_duration_sec}s)")
+        print(f"   Cropped to {target_samples} samples ({target_duration_sec}s)")
     elif current_samples < target_samples:
         # Pad: zero-padding at the end
         audio = np.pad(audio, (0, target_samples - current_samples), mode='constant')
         print(f"   ➕ Padded to {target_samples} samples ({target_duration_sec}s)")
     else:
-        print(f"   ✅ Already correct length: {target_samples} samples ({target_duration_sec}s)")
+        print(f"   Already correct length: {target_samples} samples ({target_duration_sec}s)")
     
     # Extract extended features (MFCC + Chroma + Spectral)
-    print(f"   🎵 Extracting extended features (MFCC + Chroma + Spectral)...")
+    print(f"   Extracting extended features (MFCC + Chroma + Spectral)...")
     feature_vector = extract_extended_features(audio, target_sr, n_mfcc)
-    print(f"   ✅ Feature vector created: shape {feature_vector.shape} (107 features: MFCC + Chroma + Spectral)")
+    print(f"   Feature vector created: shape {feature_vector.shape} (107 features: MFCC + Chroma + Spectral)")
     
     return feature_vector
 
@@ -100,7 +100,7 @@ def predict_emotion(audio_path: str):
     try:
         features = process_single_audio_file(audio_path)
     except Exception as e:
-        print(f"\n❌ Error processing audio file: {e}")
+        print(f"\nError processing audio file: {e}")
         import traceback
         traceback.print_exc()
         return
@@ -115,7 +115,7 @@ def predict_emotion(audio_path: str):
     labels_path = models_dir / 'vocal_tone_labels.pkl'
     
     if not model_path.exists():
-        print(f"❌ Model file not found: {model_path}")
+        print(f"Model file not found: {model_path}")
         print("   Please train the model first using: python vocal_tone/train_model.py")
         return
     
@@ -123,11 +123,11 @@ def predict_emotion(audio_path: str):
         model = joblib.load(model_path)
         scaler = joblib.load(scaler_path)
         labels_map = joblib.load(labels_path)
-        print(f"   ✅ Model loaded: {type(model).__name__}")
-        print(f"   ✅ Scaler loaded")
-        print(f"   ✅ Labels loaded: {len(labels_map)} classes")
+        print(f"   Model loaded: {type(model).__name__}")
+        print(f"   Scaler loaded")
+        print(f"   Labels loaded: {len(labels_map)} classes")
     except Exception as e:
-        print(f"❌ Error loading model: {e}")
+        print(f"Error loading model: {e}")
         import traceback
         traceback.print_exc()
         return
@@ -137,7 +137,7 @@ def predict_emotion(audio_path: str):
     # Step 3: Scale features
     print("Step 3: Scaling features...")
     features_scaled = scaler.transform([features])
-    print("   ✅ Features scaled")
+    print("   Features scaled")
     
     print()
     
@@ -154,7 +154,7 @@ def predict_emotion(audio_path: str):
     print("PREDICTION RESULTS")
     print("=" * 80)
     print(f"\n🎯 Predicted Emotion: {predicted_emotion}")
-    print(f"📊 Confidence: {confidence:.4f} ({confidence*100:.2f}%)")
+    print(f"Confidence: {confidence:.4f} ({confidence*100:.2f}%)")
     print()
     
     print("Probability distribution (all emotions):")
@@ -172,7 +172,7 @@ def predict_emotion(audio_path: str):
     
     print()
     print("=" * 80)
-    print(f"✅ Prediction complete!")
+    print(f"Prediction complete!")
     print("=" * 80)
     
     return predicted_emotion, confidence, probabilities

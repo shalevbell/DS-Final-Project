@@ -34,3 +34,24 @@ docker-compose.yml
 
 # Logs
 *.log
+
+# Large test/media files (exclude from build context)
+*.wav
+*.mp3
+*.mp4
+*.avi
+*.flac
+
+# MediaPipe models (17MB) - downloaded at runtime via entrypoint.sh
+mediapipe_models/
+
+# Pre-trained vocal tone models - downloaded via entrypoint.sh
+models/vocal_tone/*.pkl
+models/vocal_tone/*.zip
+
+# Test directory
+test/
+
+# Dataset files
+dataset/
+Savee-Classifier/

@@ -37,10 +37,10 @@ def main():
         print("\n" + "=" * 80)
         print("RESULTS:")
         print("=" * 80)
-        print(f"✅ X shape: {X.shape} (#samples, #features)")
-        print(f"✅ y shape: {y.shape} (#samples,)")
-        print(f"✅ Number of features per sample: {X.shape[1]} (40 mean + 40 std)")
-        print(f"✅ Number of classes: {len(labels_map)}")
+        print(f"X shape: {X.shape} (#samples, #features)")
+        print(f"y shape: {y.shape} (#samples,)")
+        print(f"Number of features per sample: {X.shape[1]} (40 mean + 40 std)")
+        print(f"Number of classes: {len(labels_map)}")
         print()
         
         print("Class distribution:")
@@ -70,7 +70,7 @@ def main():
         return X, y, labels_map
         
     except Exception as e:
-        print(f"\n❌ ERROR: {e}")
+        print(f"\nERROR: {e}")
         import traceback
         traceback.print_exc()
         return None, None, None

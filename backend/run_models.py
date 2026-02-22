@@ -36,6 +36,94 @@ SAVEE_DATASET_PATH_LINUX = "/data/dataset"
 # Default - will be determined at runtime
 SAVEE_DATASET_PATH = None
 
+
+def _get_dataset_path() -> str:
+    """
+    Determine SAVEE dataset path with automatic fallback.
+
+    Priority:
+        1. Environment variable (Config.SAVEE_DATASET_PATH)
+        2. Docker/Linux path (/data/dataset)
+        3. Windows development path
+
+    Returns:
+        Resolved dataset path
+    """
+    global SAVEE_DATASET_PATH
+
+    if SAVEE_DATASET_PATH is not None:
+        return SAVEE_DATASET_PATH
+
+    if Config.SAVEE_DATASET_PATH:
+        p = Path(Config.SAVEE_DATASET_PATH)
+        if p.exists():
+            SAVEE_DATASET_PATH = str(p.resolve())
+        else:
+            SAVEE_DATASET_PATH = Config.SAVEE_DATASET_PATH
+
+    if SAVEE_DATASET_PATH is None:
+        linux_path = Path(SAVEE_DATASET_PATH_LINUX)
+        if linux_path.exists():
+            SAVEE_DATASET_PATH = SAVEE_DATASET_PATH_LINUX
+        else:
+            windows_path = Path(SAVEE_DATASET_PATH_WINDOWS)
+            if windows_path.exists():
+                SAVEE_DATASET_PATH = SAVEE_DATASET_PATH_WINDOWS
+            else:
+                SAVEE_DATASET_PATH = SAVEE_DATASET_PATH_LINUX
+
+    return SAVEE_DATASET_PATH
+
+
+def _preprocess_audio_file(
+    audio_path: str,
+    target_sr: int = 16000,
+    target_duration_sec: float = 3.0
+) -> tuple:
+    """
+    Standard audio preprocessing pipeline.
+
+    Steps:
+        1. Load as mono
+        2. Resample to target_sr
+        3. Normalize to [-0.95, 0.95]
+        4. Crop or zero-pad to target_duration_sec
+
+    Args:
+        audio_path: Path to audio file (or file-like object)
+        target_sr: Target sample rate (Hz)
+        target_duration_sec: Target duration (seconds)
+
+    Returns:
+        (audio_array, sample_rate)
+    """
+    # Load audio (force mono)
+    audio, sr = librosa.load(audio_path, sr=None, mono=True)
+
+    # Resample to target sample rate if needed
+    if sr != target_sr:
+        audio = librosa.resample(audio, orig_sr=sr, target_sr=target_sr)
+        sr = target_sr
+
+    # Light normalization (divide by max absolute value, cap at 0.95 to avoid clipping)
+    max_val = np.abs(audio).max()
+    if max_val > 0:
+        audio = audio / max_val * 0.95
+
+    # Fix length: crop or pad to target_duration_sec
+    target_samples = int(target_duration_sec * target_sr)
+    current_samples = len(audio)
+
+    if current_samples > target_samples:
+        # Crop: take first target_samples
+        audio = audio[:target_samples]
+    elif current_samples < target_samples:
+        # Pad: zero-padding at the end
+        audio = np.pad(audio, (0, target_samples - current_samples), mode='constant')
+
+    return audio, sr
+
+
 def get_available_models():
     """
     Get list of available analysis models.
@@ -66,32 +154,8 @@ def list_savee_dataset_files(dataset_path: str = None) -> Dict:
             'file_extensions': dict with counts by extension
         }
     """
-    global SAVEE_DATASET_PATH
-    
     if dataset_path is None:
-        # Auto-detect which path to use
-        if SAVEE_DATASET_PATH is None:
-            # 1) Env SAVEE_DATASET_PATH (for local runs: set to your dataset folder)
-            if Config.SAVEE_DATASET_PATH:
-                p = Path(Config.SAVEE_DATASET_PATH)
-                if p.exists():
-                    SAVEE_DATASET_PATH = str(p.resolve())
-                else:
-                    SAVEE_DATASET_PATH = Config.SAVEE_DATASET_PATH
-            if SAVEE_DATASET_PATH is None:
-                # 2) Docker path
-                linux_path = Path(SAVEE_DATASET_PATH_LINUX)
-                if linux_path.exists():
-                    SAVEE_DATASET_PATH = SAVEE_DATASET_PATH_LINUX
-                else:
-                    # 3) Fallback Windows path
-                    windows_path = Path(SAVEE_DATASET_PATH_WINDOWS)
-                    if windows_path.exists():
-                        SAVEE_DATASET_PATH = SAVEE_DATASET_PATH_WINDOWS
-                    else:
-                        SAVEE_DATASET_PATH = SAVEE_DATASET_PATH_LINUX
-        
-        dataset_path = SAVEE_DATASET_PATH
+        dataset_path = _get_dataset_path()
     
     dataset_path_obj = Path(dataset_path)
     
@@ -338,28 +402,8 @@ def process_savee_dataset_for_training(
         - y: numpy array of shape (#samples,) with label indices
         - labels_map: dict mapping label index to label name (directory name)
     """
-    global SAVEE_DATASET_PATH
-    
     if dataset_path is None:
-        # Auto-detect path (same logic as list_savee_dataset_files)
-        if SAVEE_DATASET_PATH is None:
-            if Config.SAVEE_DATASET_PATH:
-                p = Path(Config.SAVEE_DATASET_PATH)
-                if p.exists():
-                    SAVEE_DATASET_PATH = str(p.resolve())
-                else:
-                    SAVEE_DATASET_PATH = Config.SAVEE_DATASET_PATH
-            if SAVEE_DATASET_PATH is None:
-                linux_path = Path(SAVEE_DATASET_PATH_LINUX)
-                if linux_path.exists():
-                    SAVEE_DATASET_PATH = SAVEE_DATASET_PATH_LINUX
-                else:
-                    windows_path = Path(SAVEE_DATASET_PATH_WINDOWS)
-                    if windows_path.exists():
-                        SAVEE_DATASET_PATH = SAVEE_DATASET_PATH_WINDOWS
-                    else:
-                        SAVEE_DATASET_PATH = SAVEE_DATASET_PATH_LINUX
-        dataset_path = SAVEE_DATASET_PATH
+        dataset_path = _get_dataset_path()
     
     dataset_path_obj = Path(dataset_path)
     
@@ -421,9 +465,9 @@ def process_savee_dataset_for_training(
     processed_count = 0
     
     if show_progress:
-        print(f"   📊 Processing {len(wav_files)} files × {len(augmentation_types)} versions = {total_files_to_process} total samples")
-        print(f"   🔄 Augmentation types: {augmentation_types}")
-        print(f"   ⏳ This may take 15-30 minutes...")
+        print(f"   Processing {len(wav_files)} files × {len(augmentation_types)} versions = {total_files_to_process} total samples")
+        print(f"   Augmentation types: {augmentation_types}")
+        print(f"   This may take 15-30 minutes...")
         print()
     
     for i, (wav_path, label_idx) in enumerate(zip(wav_files, labels_list)):
@@ -434,26 +478,8 @@ def process_savee_dataset_for_training(
                     progress_pct = (i + 1) / len(wav_files) * 100
                     print(f"   Progress: {i + 1}/{len(wav_files)} files ({progress_pct:.1f}%) | Samples created: {processed_count}/{total_files_to_process}")
             
-            # Load audio (force mono)
-            audio, sr = librosa.load(str(wav_path), sr=None, mono=True)
-            
-            # Resample to target sample rate if needed
-            if sr != target_sr:
-                audio = librosa.resample(audio, orig_sr=sr, target_sr=target_sr)
-            
-            # Light normalization (divide by max absolute value, cap at 0.95 to avoid clipping)
-            max_val = np.abs(audio).max()
-            if max_val > 0:
-                audio = audio / max_val * 0.95
-            
-            # Fix length: crop or pad to target_duration_sec
-            current_samples = len(audio)
-            if current_samples > target_samples:
-                # Crop: take first target_samples
-                audio = audio[:target_samples]
-            elif current_samples < target_samples:
-                # Pad: zero-padding at the end
-                audio = np.pad(audio, (0, target_samples - current_samples), mode='constant')
+            # Preprocess audio using standard pipeline
+            audio, sr = _preprocess_audio_file(str(wav_path), target_sr, target_duration_sec)
             
             # Process original + augmented versions
             for aug_type in augmentation_types:
@@ -476,7 +502,7 @@ def process_savee_dataset_for_training(
             
         except Exception as e:
             if show_progress:
-                print(f"   ⚠️  Warning: Error processing {wav_path.name}: {e}")
+                print(f"   Warning: Error processing {wav_path.name}: {e}")
             logger.warning(f'[VocalTone] Error processing {wav_path.name}: {e}')
             continue
     
@@ -489,13 +515,13 @@ def process_savee_dataset_for_training(
     
     if show_progress:
         print()
-        print(f"   ✅ Processing complete!")
-        print(f"   📊 X shape: {X.shape} (#samples, #features)")
-        print(f"   📊 y shape: {y.shape} (#samples,)")
-        print(f"   📊 Features per sample: {X.shape[1]} (extended: MFCC + Chroma + Spectral)")
-        print(f"   📊 Number of classes: {len(labels_map)}")
+        print(f"   Processing complete!")
+        print(f"   X shape: {X.shape} (#samples, #features)")
+        print(f"   y shape: {y.shape} (#samples,)")
+        print(f"   Features per sample: {X.shape[1]} (extended: MFCC + Chroma + Spectral)")
+        print(f"   Number of classes: {len(labels_map)}")
         if use_augmentation:
-            print(f"   📊 Dataset size increased from {len(wav_files)} to {X.shape[0]} samples (×{X.shape[0]/len(wav_files):.1f})")
+            print(f"   Dataset size increased from {len(wav_files)} to {X.shape[0]} samples (×{X.shape[0]/len(wav_files):.1f})")
         logger.info(f'[VocalTone] Processing complete!')
         logger.info(f'[VocalTone] X shape: {X.shape} (#samples, #features)')
         logger.info(f'[VocalTone] y shape: {y.shape} (#samples,)')
@@ -1126,28 +1152,12 @@ def analyze_vocal_tone(audio_bytes: bytes, session_id: str, chunk_index: int) ->
         n_mfcc = 40
 
         logger.info(f'[VocalTone] Loading and processing audio: {audio_source}')
-        
-        # Load audio (force mono)
-        audio, sr = librosa.load(audio_source, sr=None, mono=True)
-        
-        # Resample to target sample rate if needed
-        if sr != target_sr:
-            audio = librosa.resample(audio, orig_sr=sr, target_sr=target_sr)
-        
-        # Light normalization
-        max_val = np.abs(audio).max()
-        if max_val > 0:
-            audio = audio / max_val * 0.95
-        
-        # Fix length: crop or pad to target_duration_sec
-        target_samples = int(target_duration_sec * target_sr)
-        if len(audio) > target_samples:
-            audio = audio[:target_samples]
-        elif len(audio) < target_samples:
-            audio = np.pad(audio, (0, target_samples - len(audio)), mode='constant')
-        
+
+        # Preprocess audio using standard pipeline
+        audio, sr = _preprocess_audio_file(audio_source, target_sr, target_duration_sec)
+
         # Extract extended features (MFCC + Chroma + Spectral)
-        feature_vector = extract_extended_features(audio, target_sr, n_mfcc)
+        feature_vector = extract_extended_features(audio, sr, n_mfcc)
         
         logger.info(f'[VocalTone] Features extracted: shape {feature_vector.shape}')
 
@@ -1246,22 +1256,22 @@ def log_chunk_summary(session_id: str, chunk_index: int, results: Dict):
     """
     logger.info('')
     logger.info('=' * 80)
-    logger.info(f'📊 CHUNK SUMMARY: {session_id}:{chunk_index}')
+    logger.info(f'CHUNK SUMMARY: {session_id}:{chunk_index}')
     logger.info('=' * 80)
-    
+
     # Whisper results
     if 'whisper' in results:
         whisper_result = results['whisper']
         if 'error' in whisper_result:
-            logger.info('🎤 WHISPER (Transcription): ❌ FAILED')
+            logger.info('[Whisper] Transcription: FAILED')
             logger.info(f'   Error: {whisper_result["error"]}')
         else:
             transcript = whisper_result.get('transcript', '')
             language = whisper_result.get('language', 'unknown')
             confidence = whisper_result.get('confidence')
             processing_time = whisper_result.get('processing_time_ms', 0)
-            
-            logger.info('🎤 WHISPER (Transcription): ✅ SUCCESS')
+
+            logger.info('[Whisper] Transcription: SUCCESS')
             if transcript:
                 # Truncate long transcripts for readability
                 display_transcript = transcript[:200] + '...' if len(transcript) > 200 else transcript
@@ -1277,7 +1287,7 @@ def log_chunk_summary(session_id: str, chunk_index: int, results: Dict):
     if 'mediapipe' in results:
         mediapipe_result = results['mediapipe']
         if 'error' in mediapipe_result:
-            logger.info('📹 MEDIAPIPE (Video Analysis): ❌ FAILED')
+            logger.info('[MediaPipe] Video Analysis: FAILED')
             logger.info(f'   Error: {mediapipe_result["error"]}')
         else:
             emotion = mediapipe_result.get('dominant_emotion', 'unknown')
@@ -1287,8 +1297,8 @@ def log_chunk_summary(session_id: str, chunk_index: int, results: Dict):
             hands = mediapipe_result.get('hand_gestures_detected', False)
             frames = mediapipe_result.get('frames_analyzed', 0)
             processing_time = mediapipe_result.get('processing_time_ms', 0)
-            
-            logger.info('📹 MEDIAPIPE (Video Analysis): ✅ SUCCESS')
+
+            logger.info('[MediaPipe] Video Analysis: SUCCESS')
             logger.info(f'   Dominant Emotion: {emotion} (confidence: {emotion_conf:.2f})')
             logger.info(f'   Posture Score: {posture:.2f}')
             logger.info(f'   Engagement Score: {engagement:.2f}')
@@ -1300,7 +1310,7 @@ def log_chunk_summary(session_id: str, chunk_index: int, results: Dict):
     if 'vocaltone' in results:
         vocaltone_result = results['vocaltone']
         if 'error' in vocaltone_result:
-            logger.info('🎵 VOCAL TONE (Audio Emotion): ❌ FAILED')
+            logger.info('[VocalTone] Audio Emotion: FAILED')
             logger.info(f'   Error: {vocaltone_result["error"]}')
         else:
             emotion = vocaltone_result.get('emotion', 'unknown')
@@ -1309,8 +1319,8 @@ def log_chunk_summary(session_id: str, chunk_index: int, results: Dict):
             tempo = vocaltone_result.get('tempo', 0)
             energy = vocaltone_result.get('energy_level', 0)
             processing_time = vocaltone_result.get('processing_time_ms', 0)
-            
-            logger.info('🎵 VOCAL TONE (Audio Emotion): ✅ SUCCESS')
+
+            logger.info('[VocalTone] Audio Emotion: SUCCESS')
             logger.info(f'   Predicted Emotion: {emotion} (confidence: {confidence:.3f})')
             logger.info(f'   Pitch Mean: {pitch_mean:.1f} Hz')
             logger.info(f'   Tempo: {tempo:.1f} BPM')
@@ -1327,8 +1337,8 @@ def log_chunk_summary(session_id: str, chunk_index: int, results: Dict):
     
     logger.info('')
     logger.info('─' * 80)
-    logger.info(f'⏱️  Total Processing Time: {total_time}ms ({total_time/1000:.2f}s)')
-    logger.info(f'✅ Success Rate: {success_count}/{total_models} models succeeded')
+    logger.info(f'Total Processing Time: {total_time}ms ({total_time/1000:.2f}s)')
+    logger.info(f'Success Rate: {success_count}/{total_models} models succeeded')
     logger.info('=' * 80)
     logger.info('')
 

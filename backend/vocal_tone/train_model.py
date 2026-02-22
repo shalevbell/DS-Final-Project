@@ -81,8 +81,8 @@ def train_models(X_train, X_val, y_train, y_val, use_hyperparameter_tuning=True)
         )
         svm_search.fit(X_train, y_train)
         svm_model = svm_search.best_estimator_
-        print(f"   🔧 Best params: {svm_search.best_params_}")
-        print(f"   📊 Best CV score: {svm_search.best_score_:.4f}")
+        print(f"   Best params: {svm_search.best_params_}")
+        print(f"   Best CV score: {svm_search.best_score_:.4f}")
     else:
         svm_model = SVC(
             kernel='rbf',
@@ -99,7 +99,7 @@ def train_models(X_train, X_val, y_train, y_val, use_hyperparameter_tuning=True)
     svm_f1 = f1_score(y_val, svm_pred, average='weighted')
     models['SVM_RBF'] = svm_model
     results.append(('SVM_RBF', svm_model, svm_accuracy, svm_f1))
-    print(f"   ✅ SVM Accuracy: {svm_accuracy:.4f}, F1: {svm_f1:.4f}")
+    print(f"   SVM Accuracy: {svm_accuracy:.4f}, F1: {svm_f1:.4f}")
     
     # 2. SVM with Linear kernel (with hyperparameter tuning)
     print("\n2. Training SVM (Linear kernel) with hyperparameter tuning...")
@@ -125,8 +125,8 @@ def train_models(X_train, X_val, y_train, y_val, use_hyperparameter_tuning=True)
         )
         svm_linear_search.fit(X_train, y_train)
         svm_linear = svm_linear_search.best_estimator_
-        print(f"   🔧 Best params: {svm_linear_search.best_params_}")
-        print(f"   📊 Best CV score: {svm_linear_search.best_score_:.4f}")
+        print(f"   Best params: {svm_linear_search.best_params_}")
+        print(f"   Best CV score: {svm_linear_search.best_score_:.4f}")
     else:
         svm_linear = SVC(
             kernel='linear',
@@ -142,7 +142,7 @@ def train_models(X_train, X_val, y_train, y_val, use_hyperparameter_tuning=True)
     svm_linear_f1 = f1_score(y_val, svm_linear_pred, average='weighted')
     models['SVM_Linear'] = svm_linear
     results.append(('SVM_Linear', svm_linear, svm_linear_accuracy, svm_linear_f1))
-    print(f"   ✅ SVM Linear Accuracy: {svm_linear_accuracy:.4f}, F1: {svm_linear_f1:.4f}")
+    print(f"   SVM Linear Accuracy: {svm_linear_accuracy:.4f}, F1: {svm_linear_f1:.4f}")
     
     # 3. Random Forest (with hyperparameter tuning)
     print("\n3. Training Random Forest with hyperparameter tuning...")
@@ -170,8 +170,8 @@ def train_models(X_train, X_val, y_train, y_val, use_hyperparameter_tuning=True)
         )
         rf_search.fit(X_train, y_train)
         rf_model = rf_search.best_estimator_
-        print(f"   🔧 Best params: {rf_search.best_params_}")
-        print(f"   📊 Best CV score: {rf_search.best_score_:.4f}")
+        print(f"   Best params: {rf_search.best_params_}")
+        print(f"   Best CV score: {rf_search.best_score_:.4f}")
     else:
         rf_model = RandomForestClassifier(
             n_estimators=200,
@@ -189,7 +189,7 @@ def train_models(X_train, X_val, y_train, y_val, use_hyperparameter_tuning=True)
     rf_f1 = f1_score(y_val, rf_pred, average='weighted')
     models['RandomForest'] = rf_model
     results.append(('RandomForest', rf_model, rf_accuracy, rf_f1))
-    print(f"   ✅ Random Forest Accuracy: {rf_accuracy:.4f}, F1: {rf_f1:.4f}")
+    print(f"   Random Forest Accuracy: {rf_accuracy:.4f}, F1: {rf_f1:.4f}")
     
     # 4. Neural Network (MLP) (with hyperparameter tuning)
     print("\n4. Training Neural Network (MLP) with hyperparameter tuning...")
@@ -218,8 +218,8 @@ def train_models(X_train, X_val, y_train, y_val, use_hyperparameter_tuning=True)
         )
         mlp_search.fit(X_train, y_train)
         mlp_model = mlp_search.best_estimator_
-        print(f"   🔧 Best params: {mlp_search.best_params_}")
-        print(f"   📊 Best CV score: {mlp_search.best_score_:.4f}")
+        print(f"   Best params: {mlp_search.best_params_}")
+        print(f"   Best CV score: {mlp_search.best_score_:.4f}")
     else:
         mlp_model = MLPClassifier(
             hidden_layer_sizes=(256, 128, 64),
@@ -237,7 +237,7 @@ def train_models(X_train, X_val, y_train, y_val, use_hyperparameter_tuning=True)
     mlp_f1 = f1_score(y_val, mlp_pred, average='weighted')
     models['MLP'] = mlp_model
     results.append(('MLP', mlp_model, mlp_accuracy, mlp_f1))
-    print(f"   ✅ MLP Accuracy: {mlp_accuracy:.4f}, F1: {mlp_f1:.4f}")
+    print(f"   MLP Accuracy: {mlp_accuracy:.4f}, F1: {mlp_f1:.4f}")
     
     return models, results
 
@@ -304,10 +304,10 @@ def main():
             use_augmentation=True,
             augmentation_factor=2  # Creates 2 augmented versions per original file
         )
-        print(f"\n✅ Dataset loaded: {X.shape[0]} samples, {X.shape[1]} features")
-        print(f"✅ Classes: {len(labels_map)} - {list(labels_map.values())}")
+        print(f"\nDataset loaded: {X.shape[0]} samples, {X.shape[1]} features")
+        print(f"Classes: {len(labels_map)} - {list(labels_map.values())}")
     except Exception as e:
-        print(f"\n❌ Error loading dataset: {e}")
+        print(f"\nError loading dataset: {e}")
         import traceback
         traceback.print_exc()
         return
@@ -322,8 +322,8 @@ def main():
         random_state=42,
         stratify=y  # Maintain class distribution
     )
-    print(f"✅ Train set: {X_train.shape[0]} samples")
-    print(f"✅ Test set: {X_test.shape[0]} samples")
+    print(f"Train set: {X_train.shape[0]} samples")
+    print(f"Test set: {X_test.shape[0]} samples")
     
     # Step 3: Feature scaling
     print("\n" + "=" * 80)
@@ -332,7 +332,7 @@ def main():
     scaler = StandardScaler()
     X_train_scaled = scaler.fit_transform(X_train)
     X_test_scaled = scaler.transform(X_test)
-    print("✅ Features scaled (StandardScaler)")
+    print("Features scaled (StandardScaler)")
     
     # Step 4: Further split train into train/validation for model selection
     print("\n" + "=" * 80)
@@ -344,9 +344,9 @@ def main():
         random_state=42,
         stratify=y_train
     )
-    print(f"✅ Final train set: {X_train_final.shape[0]} samples")
-    print(f"✅ Validation set: {X_val.shape[0]} samples")
-    print(f"✅ Test set (reserved): {X_test_scaled.shape[0]} samples")
+    print(f"Final train set: {X_train_final.shape[0]} samples")
+    print(f"Validation set: {X_val.shape[0]} samples")
+    print(f"Test set (reserved): {X_test_scaled.shape[0]} samples")
     
     # Step 5: Train multiple models and compare
     _, results = train_models(X_train_final, X_val, y_train_final, y_val)
@@ -365,7 +365,7 @@ def main():
     best_result = max(results, key=lambda x: x[3])  # x[3] is F1 score
     best_model_name, _, best_val_acc, best_val_f1 = best_result
     
-    print(f"\n🏆 Best Model: {best_model_name}")
+    print(f"\nBest Model: {best_model_name}")
     print(f"   Validation Accuracy: {best_val_acc:.4f}")
     print(f"   Validation F1 Score: {best_val_f1:.4f}")
     
@@ -415,7 +415,7 @@ def main():
         )
     
     final_model.fit(X_train_scaled, y_train)
-    print("✅ Model retrained on full training set")
+    print("Model retrained on full training set")
     
     # Step 8: Final evaluation on test set
     print("\n" + "=" * 80)
@@ -442,9 +442,9 @@ def main():
     joblib.dump(scaler, scaler_path)
     joblib.dump(labels_map, labels_path)
     
-    print(f"✅ Model saved: {model_path}")
-    print(f"✅ Scaler saved: {scaler_path}")
-    print(f"✅ Labels map saved: {labels_path}")
+    print(f"Model saved: {model_path}")
+    print(f"Scaler saved: {scaler_path}")
+    print(f"Labels map saved: {labels_path}")
     
     # Step 9b: Create ZIP for Google Drive (so you can load the model without retraining)
     zip_path = models_dir / 'vocal_tone_model.zip'
@@ -452,7 +452,7 @@ def main():
         zf.write(model_path, model_path.name)
         zf.write(scaler_path, scaler_path.name)
         zf.write(labels_path, labels_path.name)
-    print(f"✅ ZIP for Drive: {zip_path}")
+    print(f"ZIP for Drive: {zip_path}")
     print()
     print("To use this model without retraining:")
     print("  1. Upload vocal_tone_model.zip to Google Drive.")
@@ -497,7 +497,7 @@ def create_zip_for_drive(models_dir: Path = None) -> bool:
         zf.write(model_path, model_path.name)
         zf.write(scaler_path, scaler_path.name)
         zf.write(labels_path, labels_path.name)
-    print(f"✅ ZIP for Drive: {zip_path}")
+    print(f"ZIP for Drive: {zip_path}")
     print("Upload to Google Drive, set 'Anyone with the link can view', then set DRIVE_VOCAL_TONE_MODEL_ZIP_ID to the file ID.")
     return True
 

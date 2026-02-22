@@ -30,16 +30,16 @@ def main():
     # Check if files exist
     print("Step 1: Checking model files...")
     if not model_path.exists():
-        print(f"❌ Model file not found: {model_path}")
+        print(f"Model file not found: {model_path}")
         return
     if not scaler_path.exists():
-        print(f"❌ Scaler file not found: {scaler_path}")
+        print(f"Scaler file not found: {scaler_path}")
         return
     if not labels_path.exists():
-        print(f"❌ Labels file not found: {labels_path}")
+        print(f"Labels file not found: {labels_path}")
         return
     
-    print("✅ All model files exist!")
+    print("All model files exist!")
     print(f"   Model: {model_path}")
     print(f"   Scaler: {scaler_path}")
     print(f"   Labels: {labels_path}")
@@ -51,9 +51,9 @@ def main():
         model = joblib.load(model_path)
         scaler = joblib.load(scaler_path)
         labels_map = joblib.load(labels_path)
-        print("✅ All files loaded successfully!")
+        print("All files loaded successfully!")
     except Exception as e:
-        print(f"❌ Error loading files: {e}")
+        print(f"Error loading files: {e}")
         import traceback
         traceback.print_exc()
         return
@@ -113,14 +113,14 @@ def main():
     
     # Scale features
     dummy_features_scaled = scaler.transform([dummy_features])
-    print("✅ Features scaled")
+    print("Features scaled")
     
     # Predict
     prediction = model.predict(dummy_features_scaled)[0]
     probabilities = model.predict_proba(dummy_features_scaled)[0]
     
     predicted_emotion = labels_map[prediction]
-    print(f"✅ Prediction: {predicted_emotion} (class {prediction})")
+    print(f"Prediction: {predicted_emotion} (class {prediction})")
     
     print("\nProbability distribution:")
     for i, prob in enumerate(probabilities):
@@ -129,7 +129,7 @@ def main():
     
     print()
     print("=" * 80)
-    print("✅ Model is ready to use!")
+    print("Model is ready to use!")
     print("=" * 80)
     print()
     print("To use the model in your code:")
