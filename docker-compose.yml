@@ -11,8 +11,11 @@ services:
       REDIS_URL: redis://redis:6379/0
       EVENTLET_NO_GREENDNS: "yes"
       FLASK_ENV: development
-      # Google Drive folder ID – dataset is downloaded into /data/dataset on first run (folder must be "Anyone with the link can view")
-      DRIVE_DATASET_FOLDER_ID: "150y55fRgvh8N6t8zy5potewjfEn4XHFS"
+      # Dataset from Google Drive: ZIP file (full dataset) – file ID from share link
+      DRIVE_DATASET_ZIP_ID: "1YLvn6CrpVG0fMl5DTojHzeObvCqsfKFw"
+      # Force re-download and replace dataset (set to "1", then run: docker-compose up -d --force-recreate)
+      REFRESH_DATASET: "1"
+      # DRIVE_DATASET_FOLDER_ID: "150y55fRgvh8N6t8zy5potewjfEn4XHFS"  # fallback if not using ZIP
     volumes:
       - ./backend:/app
       - ./frontend:/frontend

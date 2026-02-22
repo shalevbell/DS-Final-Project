@@ -11,10 +11,14 @@ This script:
 
 import sys
 import os
+import warnings
 from pathlib import Path
 import numpy as np
 import joblib
 from sklearn.model_selection import train_test_split, RandomizedSearchCV
+
+# Suppress sklearn parallel config warnings (cosmetic; does not affect results)
+warnings.filterwarnings("ignore", message=".*sklearn.utils.parallel.*", category=UserWarning)
 from sklearn.preprocessing import StandardScaler
 from sklearn.svm import SVC
 from sklearn.ensemble import RandomForestClassifier
