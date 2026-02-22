@@ -58,4 +58,27 @@ elif [ -n "${DRIVE_DATASET_FOLDER_ID}" ] && need_download; then
   fi
 fi
 
+# Vocal Tone model: download from Google Drive if not present (so we don't need to retrain every time)
+VOCAL_TONE_DIR="${VOCAL_TONE_MODEL_DIR:-/app/models/vocal_tone}"
+echo "[entrypoint] Vocal Tone: dir=${VOCAL_TONE_DIR}, DRIVE_ID=${DRIVE_VOCAL_TONE_MODEL_ZIP_ID:-<not set>}, has_pkl=$([ -f "${VOCAL_TONE_DIR}/vocal_tone_model.pkl" ] && echo yes || echo no)"
+if [ -z "${VOCAL_TONE_MODEL_DIR}" ] && [ -n "${DRIVE_VOCAL_TONE_MODEL_ZIP_ID}" ]; then
+  if [ ! -f "${VOCAL_TONE_DIR}/vocal_tone_model.pkl" ]; then
+    echo "[entrypoint] Downloading Vocal Tone model from Google Drive (file ID: ${DRIVE_VOCAL_TONE_MODEL_ZIP_ID})..."
+    mkdir -p "${VOCAL_TONE_DIR}"
+    if gdown "https://drive.google.com/uc?id=${DRIVE_VOCAL_TONE_MODEL_ZIP_ID}" -O "${VOCAL_TONE_DIR}/vocal_tone_model.zip" --remaining-ok; then
+      echo "[entrypoint] Extracting Vocal Tone model..."
+      if unzip -o -q "${VOCAL_TONE_DIR}/vocal_tone_model.zip" -d "${VOCAL_TONE_DIR}"; then
+        rm -f "${VOCAL_TONE_DIR}/vocal_tone_model.zip"
+        echo "[entrypoint] Vocal Tone model ready in ${VOCAL_TONE_DIR}"
+      else
+        echo "[entrypoint] WARNING: unzip of vocal_tone_model.zip failed."
+      fi
+    else
+      echo "[entrypoint] WARNING: gdown failed for Vocal Tone model. Set file to 'Anyone with the link can view'. Run: docker-compose logs backend"
+    fi
+  else
+    echo "[entrypoint] Vocal Tone model already present, skipping download."
+  fi
+fi
+
 exec "$@"

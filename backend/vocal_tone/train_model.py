@@ -12,6 +12,7 @@ This script:
 import sys
 import os
 import warnings
+import zipfile
 from pathlib import Path
 import numpy as np
 import joblib
@@ -445,6 +446,22 @@ def main():
     print(f"✅ Scaler saved: {scaler_path}")
     print(f"✅ Labels map saved: {labels_path}")
     
+    # Step 9b: Create ZIP for Google Drive (so you can load the model without retraining)
+    zip_path = models_dir / 'vocal_tone_model.zip'
+    with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zf:
+        zf.write(model_path, model_path.name)
+        zf.write(scaler_path, scaler_path.name)
+        zf.write(labels_path, labels_path.name)
+    print(f"✅ ZIP for Drive: {zip_path}")
+    print()
+    print("To use this model without retraining:")
+    print("  1. Upload vocal_tone_model.zip to Google Drive.")
+    print("  2. Set sharing to 'Anyone with the link can view'.")
+    print("  3. Copy the file ID from the share link (e.g. .../d/FILE_ID/view?usp=sharing).")
+    print("  4. Set env DRIVE_VOCAL_TONE_MODEL_ZIP_ID=<FILE_ID> (e.g. in docker-compose.yml).")
+    print("  5. On startup, the app will download the model from Drive if not present.")
+    print()
+    
     # Step 10: Summary
     print("\n" + "=" * 80)
     print("Training Complete!")
@@ -461,7 +478,38 @@ def main():
     return final_model, scaler, labels_map, test_results
 
 
+def create_zip_for_drive(models_dir: Path = None) -> bool:
+    """
+    Create vocal_tone_model.zip from existing .pkl files (no training).
+    Use when the model is already trained and you only want to upload to Drive.
+    """
+    if models_dir is None:
+        models_dir = backend_dir / 'models' / 'vocal_tone'
+    model_path = models_dir / 'vocal_tone_model.pkl'
+    scaler_path = models_dir / 'vocal_tone_scaler.pkl'
+    labels_path = models_dir / 'vocal_tone_labels.pkl'
+    for p in (model_path, scaler_path, labels_path):
+        if not p.exists():
+            print(f"Missing: {p}. Train the model first or run without --zip-only.")
+            return False
+    zip_path = models_dir / 'vocal_tone_model.zip'
+    with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zf:
+        zf.write(model_path, model_path.name)
+        zf.write(scaler_path, scaler_path.name)
+        zf.write(labels_path, labels_path.name)
+    print(f"✅ ZIP for Drive: {zip_path}")
+    print("Upload to Google Drive, set 'Anyone with the link can view', then set DRIVE_VOCAL_TONE_MODEL_ZIP_ID to the file ID.")
+    return True
+
+
 if __name__ == '__main__':
+    import argparse
+    parser = argparse.ArgumentParser(description='Train Vocal Tone model or create ZIP for Drive.')
+    parser.add_argument('--zip-only', action='store_true', help='Only create vocal_tone_model.zip from existing .pkl (no training)')
+    args = parser.parse_args()
+    if args.zip_only:
+        ok = create_zip_for_drive()
+        raise SystemExit(0 if ok else 1)
     result = main()
     if result is None:
         raise SystemExit(1)

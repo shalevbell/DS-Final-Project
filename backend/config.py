@@ -64,6 +64,9 @@ class Config:
     # Vocal Tone model: directory containing vocal_tone_model.pkl, vocal_tone_scaler.pkl, vocal_tone_labels.pkl
     # If set, overrides default backend/models/vocal_tone (e.g. /data/models/vocal_tone if mounted)
     VOCAL_TONE_MODEL_DIR = os.getenv('VOCAL_TONE_MODEL_DIR', '')
+    # Google Drive: file ID of vocal_tone_model.zip (share link "Anyone with the link can view")
+    # If set, entrypoint will download and extract to models/vocal_tone when files are missing
+    DRIVE_VOCAL_TONE_MODEL_ZIP_ID = os.getenv('DRIVE_VOCAL_TONE_MODEL_ZIP_ID', '')
 
     # SAVEE dataset path for Vocal Tone training (folder with anger/, disgust/, fear/, etc.)
     # When running locally (not in Docker), set this to your local path so train_model.py finds the data
