@@ -560,20 +560,13 @@ def analyze_audio_whisper(audio_bytes: bytes, session_id: str, chunk_index: int)
     temp_path = None
 
     try:
-        logger.info(f'[Whisper] Start chunk {session_id}:{chunk_index}')
-
         if isinstance(audio_bytes, (bytes, bytearray)):
             with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as tmp_file:
                 tmp_file.write(audio_bytes)
                 temp_path = tmp_file.name
-            logger.info(
-                f'[Whisper] Saved audio to temp file: {temp_path} '
-                f'({len(audio_bytes)} bytes)'
-            )
             audio_source = temp_path
         elif isinstance(audio_bytes, str):
             audio_source = audio_bytes
-            logger.info(f'[Whisper] Using audio path: {audio_source}')
         else:
             raise ValueError(f'Unsupported audio input type: {type(audio_bytes).__name__}')
 
@@ -843,7 +836,8 @@ def analyze_video_mediapipe(video_bytes: bytes, session_id: str, chunk_index: in
     temp_path = None
 
     try:
-        logger.info(f'[MediaPipe] Processing chunk {session_id}:{chunk_index} ({len(video_bytes)} bytes)')
+        video_kb = len(video_bytes) // 1024
+        logger.info(f'[MediaPipe] Analyzing video: {video_kb}KB')
 
         # Initialize MediaPipe models on first use (lazy loading)
         if not hasattr(analyze_video_mediapipe, '_landmarkers'):
@@ -1088,21 +1082,17 @@ def analyze_vocal_tone(audio_bytes: bytes, session_id: str, chunk_index: int) ->
     temp_path = None
 
     try:
-        logger.info(f'[VocalTone] Processing chunk {session_id}:{chunk_index} ({len(audio_bytes)} bytes)')
+        audio_kb = len(audio_bytes) // 1024
+        logger.info(f'[VocalTone] Analyzing audio: {audio_kb}KB')
 
         # Create temporary WAV file from audio_bytes (same pattern as Whisper)
         if isinstance(audio_bytes, (bytes, bytearray)):
             with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as tmp_file:
                 tmp_file.write(audio_bytes)
                 temp_path = tmp_file.name
-            logger.info(
-                f'[VocalTone] Saved audio to temp file: {temp_path} '
-                f'({len(audio_bytes)} bytes)'
-            )
             audio_source = temp_path
         elif isinstance(audio_bytes, str):
             audio_source = audio_bytes
-            logger.info(f'[VocalTone] Using audio path: {audio_source}')
         else:
             raise ValueError(f'Unsupported audio input type: {type(audio_bytes).__name__}')
 
@@ -1151,15 +1141,11 @@ def analyze_vocal_tone(audio_bytes: bytes, session_id: str, chunk_index: int) ->
         target_duration_sec = 3.0
         n_mfcc = 40
 
-        logger.info(f'[VocalTone] Loading and processing audio: {audio_source}')
-
         # Preprocess audio using standard pipeline
         audio, sr = _preprocess_audio_file(audio_source, target_sr, target_duration_sec)
 
         # Extract extended features (MFCC + Chroma + Spectral)
         feature_vector = extract_extended_features(audio, sr, n_mfcc)
-        
-        logger.info(f'[VocalTone] Features extracted: shape {feature_vector.shape}')
 
         # Scale features
         features_scaled = scaler.transform([feature_vector])

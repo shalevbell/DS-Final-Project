@@ -58,7 +58,7 @@ socketio = SocketIO(
 
 # Initialize services
 redis_client = get_redis_client()
-chunk_processor = initialize_chunk_processor()
+chunk_processor = initialize_chunk_processor(socketio_instance=socketio)
 
 # Register routes and handlers
 register_http_routes(app, chunk_processor, frontend_dir)

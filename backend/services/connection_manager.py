@@ -77,9 +77,12 @@ def check_redis_health() -> Tuple[bool, str]:
         return False, str(e)
 
 
-def initialize_chunk_processor() -> ChunkProcessor:
+def initialize_chunk_processor(socketio_instance=None) -> ChunkProcessor:
     """
     Initialize and start background chunk processor.
+
+    Args:
+        socketio_instance: Optional SocketIO instance for emitting events
 
     Returns:
         ChunkProcessor instance
@@ -91,7 +94,8 @@ def initialize_chunk_processor() -> ChunkProcessor:
             max_workers=Config.PROCESSING_MAX_WORKERS,
             queue_size=Config.PROCESSING_QUEUE_SIZE,
             pubsub_channel=Config.PUBSUB_CHANNEL,
-            reconnect_delay=Config.PUBSUB_RECONNECT_DELAY
+            reconnect_delay=Config.PUBSUB_RECONNECT_DELAY,
+            socketio_instance=socketio_instance
         )
         _chunk_processor.start()
         logger.info('Chunk processor initialized and started')
