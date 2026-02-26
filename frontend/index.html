@@ -13,36 +13,52 @@
         </header>
 
         <div class="main-content">
-            <div class="video-panel">
-                <h2>Candidate Video</h2>
-                <div class="video-container">
-                    <video id="video-preview" autoplay muted></video>
-                    <div id="connection-status" class="connection-indicator">
-                        <span class="dot"></span>
-                        <span class="text">Camera Off</span>
+            <div class="left-panel">
+                <div class="video-panel">
+                    <h2>Candidate Video</h2>
+                    <div class="video-container">
+                        <video id="video-preview" autoplay muted></video>
+                        <div id="connection-status" class="connection-indicator">
+                            <span class="dot"></span>
+                            <span class="text">Camera Off</span>
+                        </div>
+                    </div>
+
+                    <div class="camera-selector">
+                        <label for="camera-select">Select Camera:</label>
+                        <select id="camera-select" class="camera-dropdown">
+                            <option value="">Loading cameras...</option>
+                        </select>
+                    </div>
+
+                    <div class="video-controls">
+                        <button id="btn-toggle-camera" class="btn btn-primary">
+                            Start Camera
+                        </button>
+                    </div>
+
+                    <div id="permission-info" class="permission-info hidden">
+                        <p class="info-text">
+                            <strong>הערה:</strong> הדפדפן שומר את ההרשאות שניתנו בעבר.
+                            אם כבר נתת הרשאה בעבר, הפרומפט לא יופיע שוב.
+                            <br>
+                            <small>לאפס הרשאות: הגדרות דפדפן → פרטיות → הרשאות אתר → מצלמה/מיקרופון</small>
+                        </p>
                     </div>
                 </div>
+            </div>
 
-                <div class="camera-selector">
-                    <label for="camera-select">Select Camera:</label>
-                    <select id="camera-select" class="camera-dropdown">
-                        <option value="">Loading cameras...</option>
-                    </select>
-                </div>
-
-                <div class="video-controls">
-                    <button id="btn-toggle-camera" class="btn btn-primary">
-                        Start Camera
-                    </button>
-                </div>
-                
-                <div id="permission-info" class="permission-info hidden">
-                    <p class="info-text">
-                        <strong>הערה:</strong> הדפדפן שומר את ההרשאות שניתנו בעבר. 
-                        אם כבר נתת הרשאה בעבר, הפרומפט לא יופיע שוב.
-                        <br>
-                        <small>לאפס הרשאות: הגדרות דפדפן → פרטיות → הרשאות אתר → מצלמה/מיקרופון</small>
-                    </p>
+            <div class="right-panel">
+                <div class="output-window">
+                    <div class="output-header">
+                        <h2>Analysis Output</h2>
+                        <button id="clear-output-btn" class="btn-clear">Clear</button>
+                    </div>
+                    <div class="output-content" id="output-content">
+                        <div class="output-placeholder">
+                            Analysis results will appear here after you start the camera...
+                        </div>
+                    </div>
                 </div>
             </div>
         </div>

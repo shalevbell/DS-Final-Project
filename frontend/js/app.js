@@ -4,6 +4,86 @@
  * This file implements WebRTC camera functionality with WebSocket communication.
  */
 
+/**
+ * TextStreamer - Modular letter-by-letter text animator
+ */
+class TextStreamer {
+    constructor(containerElement) {
+        this.container = containerElement;
+        this.queue = []; // Queue of items (text or elements) to display
+        this.isStreaming = false;
+        this.streamSpeed = 15; // ms per character
+    }
+
+    /**
+     * Add text to streaming queue
+     * @param {string} text - Text to stream
+     * @param {string} className - CSS class for styling
+     */
+    addText(text, className = 'model-text') {
+        this.queue.push({ type: 'text', text, className });
+        if (!this.isStreaming) {
+            this.processQueue();
+        }
+    }
+
+    /**
+     * Add element to queue (will appear in order)
+     * @param {HTMLElement} element - DOM element to add
+     */
+    addElement(element) {
+        this.queue.push({ type: 'element', element });
+        if (!this.isStreaming) {
+            this.processQueue();
+        }
+    }
+
+    /**
+     * Process queue with letter-by-letter animation for text
+     */
+    async processQueue() {
+        if (this.queue.length === 0) {
+            this.isStreaming = false;
+            return;
+        }
+
+        this.isStreaming = true;
+        const item = this.queue.shift();
+
+        if (item.type === 'element') {
+            // Add element immediately
+            this.container.appendChild(item.element);
+        } else if (item.type === 'text') {
+            // Create container for this text segment
+            const textElement = document.createElement('div');
+            textElement.className = item.className;
+            this.container.appendChild(textElement);
+
+            // Stream letter by letter
+            for (let i = 0; i < item.text.length; i++) {
+                textElement.textContent += item.text[i];
+                await this.sleep(this.streamSpeed);
+            }
+        }
+
+        // Process next item
+        this.processQueue();
+    }
+
+    /**
+     * Clear all output
+     */
+    clear() {
+        this.queue = [];
+        this.isStreaming = false;
+        this.container.innerHTML = '';
+    }
+
+    sleep(ms) {
+        return new Promise(resolve => setTimeout(resolve, ms));
+    }
+}
+
 class VideoApp {
     constructor() {
         this.videoElement = document.getElementById('video-preview');
@@ -11,6 +91,8 @@ class VideoApp {
         this.toggleButton = document.getElementById('btn-toggle-camera');
         this.permissionInfo = document.getElementById('permission-info');
         this.cameraSelect = document.getElementById('camera-select');
+        this.clearOutputBtn = document.getElementById('clear-output-btn');
+        this.outputContent = document.getElementById('output-content');
         this.localStream = null;
         this.mediaRecorder = null;
         this.socket = null;
@@ -20,6 +102,7 @@ class VideoApp {
         this.isRecording = false;
         this.isCameraActive = false;
         this.chunkDurationMs = 30000;  // Default, will be overridden by backend
+        this.textStreamer = null;
 
         // Session-specific state (initialized when camera starts)
         this.sessionId = null;
@@ -69,6 +152,9 @@ class VideoApp {
                 console.log(`Chunk duration set to ${this.chunkDurationMs}ms`);
             }
         });
+        this.socket.on('chunk_results', (data) => {
+            this.handleChunkResults(data);
+        });
     }
     
     sendWebSocketMessage(event, data = {}) {
@@ -83,6 +169,17 @@ class VideoApp {
                 this.stopCamera();
             } else {
                 this.startCamera();
+            }
+        });
+
+        this.clearOutputBtn.addEventListener('click', () => {
+            if (this.textStreamer) {
+                this.textStreamer.clear();
+                // Add placeholder back
+                const placeholder = document.createElement('div');
+                placeholder.className = 'output-placeholder';
+                placeholder.textContent = 'Analysis results will appear here after you start the camera...';
+                this.outputContent.appendChild(placeholder);
             }
         });
     }
@@ -320,6 +417,131 @@ class VideoApp {
         this.toggleButton.classList.remove('btn-danger');
         this.toggleButton.classList.add('btn-primary');
         this.sendWebSocketMessage('camera_error', { error: error.name, message: error.message });
+    }
+
+    /**
+     * Handle incoming chunk results from backend
+     */
+    handleChunkResults(data) {
+        const { chunkIndex, results, timestamp } = data;
+
+        console.log(`[Output] Chunk ${chunkIndex} received - Models: ${Object.keys(results).join(', ')}`);
+
+        // Initialize TextStreamer if not already initialized
+        if (!this.textStreamer) {
+            this.textStreamer = new TextStreamer(this.outputContent);
+            // Remove placeholder
+            const placeholder = this.outputContent.querySelector('.output-placeholder');
+            if (placeholder) {
+                placeholder.remove();
+            }
+        }
+
+        // Format header
+        const date = new Date(timestamp);
+        const timeStr = date.toLocaleTimeString();
+        const header = `\n${'─'.repeat(50)}\nChunk ${chunkIndex} | ${timeStr}\n${'─'.repeat(50)}\n\n`;
+
+        // Create header element
+        const headerElement = document.createElement('div');
+        headerElement.className = 'chunk-header';
+        headerElement.textContent = header;
+        this.textStreamer.addElement(headerElement);
+
+        // Stream each model's output
+        this.displayWhisperOutput(results.whisper);
+        this.displayMediaPipeOutput(results.mediapipe);
+        this.displayVocalToneOutput(results.vocal_tone);
+    }
+
+    /**
+     * Display Whisper transcription
+     */
+    displayWhisperOutput(whisperData) {
+        if (!whisperData) return;
+
+        const header = document.createElement('div');
+        header.className = 'model-name';
+        header.textContent = '🎤 TRANSCRIPTION';
+        this.textStreamer.addElement(header);
+
+        if (whisperData.error) {
+            console.error('[Whisper] Error:', whisperData.error);
+            this.textStreamer.addText(`Error: ${whisperData.error}\n\n`);
+        } else {
+            const text = whisperData.text || '(No speech detected)';
+            this.textStreamer.addText(text + '\n\n');
+        }
+    }
+
+    /**
+     * Display MediaPipe analysis
+     */
+    displayMediaPipeOutput(mediapipeData) {
+        if (!mediapipeData) return;
+
+        const header = document.createElement('div');
+        header.className = 'model-name';
+        header.textContent = '👤 FACIAL & POSTURE';
+        this.textStreamer.addElement(header);
+
+        if (mediapipeData.error) {
+            console.error('[MediaPipe] Error:', mediapipeData.error);
+            this.textStreamer.addText(`Error: ${mediapipeData.error}\n\n`);
+        } else {
+            const emotion = mediapipeData.dominant_emotion || 'N/A';
+            const postureScore = mediapipeData.posture_score
+                ? (mediapipeData.posture_score * 100).toFixed(1) + '%'
+                : 'N/A';
+            const engagementScore = mediapipeData.engagement_score
+                ? (mediapipeData.engagement_score * 100).toFixed(1) + '%'
+                : 'N/A';
+            const framesAnalyzed = mediapipeData.frames_analyzed || 0;
+
+            const text = `Emotion: ${emotion}\n` +
+                        `Posture Score: ${postureScore}\n` +
+                        `Engagement: ${engagementScore}\n` +
+                        `Frames Analyzed: ${framesAnalyzed}\n\n`;
+            this.textStreamer.addText(text);
+        }
+    }
+
+    /**
+     * Display VocalTone emotion analysis
+     */
+    displayVocalToneOutput(vocalToneData) {
+        if (!vocalToneData) return;
+
+        const header = document.createElement('div');
+        header.className = 'model-name';
+        header.textContent = '🎵 VOCAL EMOTION';
+        this.textStreamer.addElement(header);
+
+        if (vocalToneData.error) {
+            console.error('[VocalTone] Error:', vocalToneData.error);
+            this.textStreamer.addText(`Error: ${vocalToneData.error}\n\n`);
+        } else {
+            const emotion = vocalToneData.predicted_emotion || 'N/A';
+            const confidence = vocalToneData.confidence
+                ? (vocalToneData.confidence * 100).toFixed(1) + '%'
+                : 'N/A';
+            const energy = vocalToneData.energy_level
+                ? vocalToneData.energy_level.toFixed(3)
+                : 'N/A';
+            const pitch = vocalToneData.pitch_mean
+                ? vocalToneData.pitch_mean.toFixed(1) + ' Hz'
+                : 'N/A';
+            const tempo = vocalToneData.tempo
+                ? vocalToneData.tempo.toFixed(1) + ' BPM'
+                : 'N/A';
+
+            const text = `Emotion: ${emotion}\n` +
+                        `Confidence: ${confidence}\n` +
+                        `Energy Level: ${energy}\n` +
+                        `Pitch: ${pitch}\n` +
+                        `Tempo: ${tempo}\n\n`;
+            this.textStreamer.addText(text);
+        }
     }
 }
 
