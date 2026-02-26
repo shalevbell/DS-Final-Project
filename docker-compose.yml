@@ -11,9 +11,20 @@ services:
       REDIS_URL: redis://redis:6379/0
       EVENTLET_NO_GREENDNS: "yes"
       FLASK_ENV: development
+      # Dataset from Google Drive: ZIP file (full dataset) – file ID from share link
+      DRIVE_DATASET_ZIP_ID: "1YLvn6CrpVG0fMl5DTojHzeObvCqsfKFw"
+      # Force re-download and replace dataset (set to "1" only when you want to refresh, then run: docker-compose up -d --force-recreate)
+      REFRESH_DATASET: "0"
+      # DRIVE_DATASET_FOLDER_ID: "150y55fRgvh8N6t8zy5potewjfEn4XHFS"  # fallback if not using ZIP
+      # Vocal Tone: pre-trained model ZIP on Google Drive (vocal_tone_model.zip)
+      DRIVE_VOCAL_TONE_MODEL_ZIP_ID: "1YbhpOas40kKZNHaPigMbP9WiWLbwvMdS"
     volumes:
       - ./backend:/app
       - ./frontend:/frontend
+      # Dataset: filled by entrypoint from Google Drive on first run; persisted across restarts
+      - dataset_data:/data/dataset
+      # Persist Whisper model cache between container restarts
+      - whisper_cache:/root/.cache/huggingface
     depends_on:
       postgres:
         condition: service_healthy
@@ -55,3 +66,5 @@ services:
 volumes:
   postgres_data:
   redis_data:
+  whisper_cache:
+  dataset_data:

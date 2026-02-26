@@ -1,7 +1,7 @@
 """
 Video processing module.
 
-Handles chunk data parsing and FFmpeg conversion to MP4/MP3 formats.
+Handles chunk data parsing and FFmpeg conversion to MP4/WAV formats.
 """
 
 import logging
@@ -57,7 +57,7 @@ def parse_chunk_data(chunk_data) -> bytes:
 
 def convert_chunk_with_ffmpeg(input_bytes: bytes, ffmpeg_path: str) -> Tuple[bytes, bytes]:
     """
-    Convert video chunk to MP4 and extract audio to MP3 using FFmpeg.
+    Convert video chunk to MP4 and extract audio to WAV using FFmpeg.
 
     Args:
         input_bytes: Raw video chunk data
@@ -66,7 +66,7 @@ def convert_chunk_with_ffmpeg(input_bytes: bytes, ffmpeg_path: str) -> Tuple[byt
     Returns:
         Tuple of (video_bytes, audio_bytes)
         - video_bytes: MP4-encoded video (fragmented for pipe compatibility)
-        - audio_bytes: MP3-encoded audio
+        - audio_bytes: WAV-encoded audio
 
     Raises:
         subprocess.CalledProcessError: If FFmpeg conversion fails
@@ -87,18 +87,17 @@ def convert_chunk_with_ffmpeg(input_bytes: bytes, ffmpeg_path: str) -> Tuple[byt
     )
     video_bytes = video_proc.stdout
 
-    # Extract audio to MP3
+    # Extract audio to WAV
     audio_proc = subprocess.run(
         [
             ffmpeg_path, '-hide_banner', '-loglevel', 'error',
             '-i', 'pipe:0',
             '-vn',  # No video
             '-map', '0:a:0',  # Map first audio stream
-            '-c:a', 'libmp3lame',  # MP3 codec
-            '-b:a', '128k',  # Bitrate
+            '-c:a', 'pcm_s16le',  # WAV codec (PCM 16-bit little-endian)
             '-ar', '44100',  # Standard sample rate
             '-ac', '2',  # Stereo (2 channels)
-            '-f', 'mp3', 'pipe:1'
+            '-f', 'wav', 'pipe:1'
         ],
         input=input_bytes,
         capture_output=True,

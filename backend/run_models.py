@@ -19,10 +19,109 @@ import cv2
 import mediapipe as mp
 import numpy as np
 from faster_whisper import WhisperModel
+import librosa
+import soundfile as sf
+import joblib
 
 from config import Config
 
 logger = logging.getLogger(__name__)
+
+# Path to SAVEE dataset for Vocal Tone training
+# Windows path (when running locally on Windows)
+SAVEE_DATASET_PATH_WINDOWS = r"C:\Users\shira\OneDrive\שולחן העבודה\finalProjectFiles\DB for Proj\Savee-Classifier"
+# Linux path (when running inside Docker container)
+# Note: docker-compose maps the parent directory, so we need to go into Savee-Classifier
+SAVEE_DATASET_PATH_LINUX = "/data/dataset"
+# Default - will be determined at runtime
+SAVEE_DATASET_PATH = None
+
+
+def _get_dataset_path() -> str:
+    """
+    Determine SAVEE dataset path with automatic fallback.
+
+    Priority:
+        1. Environment variable (Config.SAVEE_DATASET_PATH)
+        2. Docker/Linux path (/data/dataset)
+        3. Windows development path
+
+    Returns:
+        Resolved dataset path
+    """
+    global SAVEE_DATASET_PATH
+
+    if SAVEE_DATASET_PATH is not None:
+        return SAVEE_DATASET_PATH
+
+    if Config.SAVEE_DATASET_PATH:
+        p = Path(Config.SAVEE_DATASET_PATH)
+        if p.exists():
+            SAVEE_DATASET_PATH = str(p.resolve())
+        else:
+            SAVEE_DATASET_PATH = Config.SAVEE_DATASET_PATH
+
+    if SAVEE_DATASET_PATH is None:
+        linux_path = Path(SAVEE_DATASET_PATH_LINUX)
+        if linux_path.exists():
+            SAVEE_DATASET_PATH = SAVEE_DATASET_PATH_LINUX
+        else:
+            windows_path = Path(SAVEE_DATASET_PATH_WINDOWS)
+            if windows_path.exists():
+                SAVEE_DATASET_PATH = SAVEE_DATASET_PATH_WINDOWS
+            else:
+                SAVEE_DATASET_PATH = SAVEE_DATASET_PATH_LINUX
+
+    return SAVEE_DATASET_PATH
+
+
+def _preprocess_audio_file(
+    audio_path: str,
+    target_sr: int = 16000,
+    target_duration_sec: float = 3.0
+) -> tuple:
+    """
+    Standard audio preprocessing pipeline.
+
+    Steps:
+        1. Load as mono
+        2. Resample to target_sr
+        3. Normalize to [-0.95, 0.95]
+        4. Crop or zero-pad to target_duration_sec
+
+    Args:
+        audio_path: Path to audio file (or file-like object)
+        target_sr: Target sample rate (Hz)
+        target_duration_sec: Target duration (seconds)
+
+    Returns:
+        (audio_array, sample_rate)
+    """
+    # Load audio (force mono)
+    audio, sr = librosa.load(audio_path, sr=None, mono=True)
+
+    # Resample to target sample rate if needed
+    if sr != target_sr:
+        audio = librosa.resample(audio, orig_sr=sr, target_sr=target_sr)
+        sr = target_sr
+
+    # Light normalization (divide by max absolute value, cap at 0.95 to avoid clipping)
+    max_val = np.abs(audio).max()
+    if max_val > 0:
+        audio = audio / max_val * 0.95
+
+    # Fix length: crop or pad to target_duration_sec
+    target_samples = int(target_duration_sec * target_sr)
+    current_samples = len(audio)
+
+    if current_samples > target_samples:
+        # Crop: take first target_samples
+        audio = audio[:target_samples]
+    elif current_samples < target_samples:
+        # Pad: zero-padding at the end
+        audio = np.pad(audio, (0, target_samples - current_samples), mode='constant')
+
+    return audio, sr
 
 
 def get_available_models():
@@ -36,6 +135,406 @@ def get_available_models():
     return list(MODEL_REGISTRY.keys())
 
 
+def list_savee_dataset_files(dataset_path: str = None) -> Dict:
+    """
+    List all files in the SAVEE dataset directory for Vocal Tone model training.
+
+    Args:
+        dataset_path: Path to the SAVEE dataset directory. 
+                     If None, uses the default path (detected automatically).
+
+    Returns:
+        Dictionary with file listing results:
+        {
+            'path': str,
+            'exists': bool,
+            'total_files': int,
+            'files': list of file info dicts,
+            'directories': list of subdirectory names,
+            'file_extensions': dict with counts by extension
+        }
+    """
+    if dataset_path is None:
+        dataset_path = _get_dataset_path()
+    
+    dataset_path_obj = Path(dataset_path)
+    
+    result = {
+        'path': str(dataset_path_obj),
+        'exists': False,
+        'total_files': 0,
+        'files': [],
+        'directories': [],
+        'file_extensions': {},
+        'error': None
+    }
+    
+    try:
+        if not dataset_path_obj.exists():
+            error_msg = f'Dataset path does not exist: {dataset_path}'
+            logger.error(f'[VocalTone] {error_msg}')
+            result['error'] = error_msg
+            return result
+        
+        if not dataset_path_obj.is_dir():
+            error_msg = f'Path is not a directory: {dataset_path}'
+            logger.error(f'[VocalTone] {error_msg}')
+            result['error'] = error_msg
+            return result
+        
+        result['exists'] = True
+        
+        # List all files and directories
+        files_list = []
+        directories_list = []
+        extensions_count = {}
+        
+        for item in dataset_path_obj.iterdir():
+            if item.is_file():
+                file_info = {
+                    'name': item.name,
+                    'path': str(item),
+                    'size_bytes': item.stat().st_size,
+                    'size_mb': round(item.stat().st_size / (1024 * 1024), 2),
+                    'extension': item.suffix.lower()
+                }
+                files_list.append(file_info)
+                
+                # Count extensions
+                ext = item.suffix.lower() or 'no_extension'
+                extensions_count[ext] = extensions_count.get(ext, 0) + 1
+            
+            elif item.is_dir():
+                directories_list.append(item.name)
+        
+        # Sort files by name
+        files_list.sort(key=lambda x: x['name'])
+        directories_list.sort()
+        
+        result['total_files'] = len(files_list)
+        result['files'] = files_list
+        result['directories'] = directories_list
+        result['file_extensions'] = extensions_count
+        
+        # Print to console/logs
+        logger.info(f'[VocalTone] Dataset path: {dataset_path}')
+        logger.info(f'[VocalTone] Total files found: {result["total_files"]}')
+        logger.info(f'[VocalTone] Directories: {len(directories_list)}')
+        logger.info(f'[VocalTone] File extensions: {extensions_count}')
+        
+        if files_list:
+            logger.info('[VocalTone] Sample files (first 10):')
+            for file_info in files_list[:10]:
+                logger.info(f'  - {file_info["name"]} ({file_info["size_mb"]} MB, {file_info["extension"]})')
+            if len(files_list) > 10:
+                logger.info(f'  ... and {len(files_list) - 10} more files')
+        
+        if directories_list:
+            logger.info(f'[VocalTone] Subdirectories: {", ".join(directories_list)}')
+        
+        return result
+        
+    except PermissionError as e:
+        error_msg = f'Permission denied accessing path: {dataset_path}'
+        logger.error(f'[VocalTone] {error_msg}: {e}')
+        result['error'] = error_msg
+        return result
+    except Exception as e:
+        error_msg = f'Error listing dataset files: {str(e)}'
+        logger.error(f'[VocalTone] {error_msg}\n{traceback.format_exc()}')
+        result['error'] = error_msg
+        return result
+
+
+def augment_audio(audio: np.ndarray, sr: int, augmentation_type: str = 'none') -> np.ndarray:
+    """
+    Apply data augmentation to audio signal.
+    
+    Args:
+        audio: Audio waveform array
+        sr: Sample rate
+        augmentation_type: Type of augmentation:
+            - 'none': No augmentation (original)
+            - 'time_stretch': Time stretching (±10%)
+            - 'pitch_shift': Pitch shifting (±2 semitones)
+            - 'noise': Add Gaussian noise (SNR ~20dB)
+            - 'time_shift': Time shifting (circular shift)
+    
+    Returns:
+        Augmented audio array (same length as input)
+    """
+    if augmentation_type == 'none':
+        return audio
+    
+    elif augmentation_type == 'time_stretch':
+        # Time stretching: speed up or slow down by ±10%
+        rate = np.random.uniform(0.9, 1.1)
+        stretched = librosa.effects.time_stretch(audio, rate=rate)
+        # Crop or pad to original length
+        target_len = len(audio)
+        if len(stretched) > target_len:
+            stretched = stretched[:target_len]
+        elif len(stretched) < target_len:
+            stretched = np.pad(stretched, (0, target_len - len(stretched)), mode='constant')
+        return stretched
+    
+    elif augmentation_type == 'pitch_shift':
+        # Pitch shifting: shift by ±2 semitones
+        n_steps = np.random.uniform(-2, 2)
+        return librosa.effects.pitch_shift(audio, sr=sr, n_steps=n_steps)
+    
+    elif augmentation_type == 'noise':
+        # Add Gaussian noise (SNR ~20dB)
+        noise_level = np.random.uniform(0.01, 0.05)  # 1-5% of signal amplitude
+        noise = np.random.normal(0, noise_level, len(audio))
+        augmented = audio + noise
+        # Re-normalize to prevent clipping
+        max_val = np.abs(augmented).max()
+        if max_val > 0:
+            augmented = augmented / max_val * 0.95
+        return augmented
+    
+    elif augmentation_type == 'time_shift':
+        # Circular time shift (wrap around)
+        shift_amount = np.random.randint(0, len(audio))
+        return np.roll(audio, shift_amount)
+    
+    else:
+        return audio
+
+
+def extract_extended_features(
+    audio: np.ndarray,
+    sr: int,
+    n_mfcc: int = 40
+) -> np.ndarray:
+    """
+    Extract extended feature set from audio:
+    - MFCC features (mean + std): 40 * 2 = 80 features
+    - Chroma features (mean + std): 12 * 2 = 24 features
+    - Spectral features (centroid, rolloff, zero-crossing rate): 3 features
+    
+    Total: 80 + 24 + 3 = 107 features
+    
+    Args:
+        audio: Audio waveform array
+        sr: Sample rate
+        n_mfcc: Number of MFCC coefficients (default: 40)
+    
+    Returns:
+        Feature vector of length 107
+    """
+    features = []
+    
+    # 1. MFCC features (80 features: 40 mean + 40 std)
+    mfccs = librosa.feature.mfcc(
+        y=audio,
+        sr=sr,
+        n_mfcc=n_mfcc,
+        n_fft=2048,
+        hop_length=512,
+        n_mels=128
+    )
+    mfcc_mean = np.mean(mfccs, axis=1)
+    mfcc_std = np.std(mfccs, axis=1)
+    features.extend(mfcc_mean)
+    features.extend(mfcc_std)
+    
+    # 2. Chroma features (24 features: 12 mean + 12 std)
+    chroma = librosa.feature.chroma_stft(
+        y=audio,
+        sr=sr,
+        n_fft=2048,
+        hop_length=512
+    )
+    chroma_mean = np.mean(chroma, axis=1)
+    chroma_std = np.std(chroma, axis=1)
+    features.extend(chroma_mean)
+    features.extend(chroma_std)
+    
+    # 3. Spectral features (3 features)
+    # Spectral centroid
+    spectral_centroids = librosa.feature.spectral_centroid(y=audio, sr=sr)[0]
+    features.append(np.mean(spectral_centroids))
+    
+    # Spectral rolloff
+    spectral_rolloff = librosa.feature.spectral_rolloff(y=audio, sr=sr)[0]
+    features.append(np.mean(spectral_rolloff))
+    
+    # Zero-crossing rate
+    zcr = librosa.feature.zero_crossing_rate(audio)[0]
+    features.append(np.mean(zcr))
+    
+    return np.array(features)
+
+
+def process_savee_dataset_for_training(
+    dataset_path: str = None,
+    target_sr: int = 16000,
+    target_duration_sec: float = 3.0,
+    n_mfcc: int = 40,
+    show_progress: bool = True,
+    use_augmentation: bool = True,
+    augmentation_factor: int = 2
+) -> tuple:
+    """
+    Process all WAV files in SAVEE dataset for Vocal Tone model training.
+    
+    For each WAV file:
+    - Load audio waveform
+    - Normalize format: mono + 16kHz + light normalization
+    - Fix length: crop or pad to target_duration_sec (default 3 seconds)
+    - Extract extended features: MFCC + Chroma + Spectral (107 features total)
+    - Optionally apply data augmentation to increase dataset size
+    
+    Args:
+        dataset_path: Path to Savee-Classifier directory. If None, uses default path.
+        target_sr: Target sample rate (default: 16000 Hz)
+        target_duration_sec: Target duration in seconds (default: 3.0)
+        n_mfcc: Number of MFCC coefficients to extract (default: 40)
+        show_progress: Whether to print progress messages
+        use_augmentation: Whether to apply data augmentation (default: True)
+        augmentation_factor: Number of augmented versions per original file (default: 2)
+    
+    Returns:
+        Tuple of (X, y, labels_map) where:
+        - X: numpy array of shape (#samples, #features) where #features = 107
+        - y: numpy array of shape (#samples,) with label indices
+        - labels_map: dict mapping label index to label name (directory name)
+    """
+    if dataset_path is None:
+        dataset_path = _get_dataset_path()
+    
+    dataset_path_obj = Path(dataset_path)
+    
+    if not dataset_path_obj.exists():
+        raise ValueError(f'Dataset path does not exist: {dataset_path}')
+    
+    if not dataset_path_obj.is_dir():
+        raise ValueError(f'Path is not a directory: {dataset_path}')
+    
+    # Find all WAV files organized by subdirectory (each subdirectory is a label)
+    wav_files = []
+    labels_list = []
+    
+    if show_progress:
+        logger.info(f'[VocalTone] Scanning dataset: {dataset_path}')
+    
+    # Get all subdirectories (each is a label/class)
+    subdirs = [d for d in dataset_path_obj.iterdir() if d.is_dir()]
+    subdirs.sort()
+    
+    labels_map = {}
+    label_to_idx = {}
+    
+    for subdir in subdirs:
+        label_name = subdir.name
+        if label_name not in label_to_idx:
+            idx = len(label_to_idx)
+            label_to_idx[label_name] = idx
+            labels_map[idx] = label_name
+        
+        # Find all WAV files in this subdirectory
+        wav_files_in_dir = list(subdir.glob('*.wav')) + list(subdir.glob('*.WAV'))
+        
+        for wav_file in wav_files_in_dir:
+            wav_files.append(wav_file)
+            labels_list.append(label_to_idx[label_name])
+    
+    if len(wav_files) == 0:
+        raise ValueError(f'No WAV files found in dataset: {dataset_path}')
+    
+    if show_progress:
+        logger.info(f'[VocalTone] Found {len(wav_files)} WAV files in {len(label_to_idx)} classes')
+        logger.info(f'[VocalTone] Classes: {list(label_to_idx.keys())}')
+    
+    # Process each WAV file
+    features_list = []
+    valid_labels = []
+    
+    target_samples = int(target_duration_sec * target_sr)
+    
+    # Augmentation types to apply
+    augmentation_types = ['none']  # Always include original
+    if use_augmentation:
+        augmentation_types.extend(['time_stretch', 'pitch_shift', 'noise', 'time_shift'])
+        # Limit augmentation to augmentation_factor per file
+        augmentation_types = augmentation_types[:augmentation_factor + 1]
+    
+    total_files_to_process = len(wav_files) * len(augmentation_types)
+    processed_count = 0
+    
+    if show_progress:
+        print(f"   Processing {len(wav_files)} files × {len(augmentation_types)} versions = {total_files_to_process} total samples")
+        print(f"   Augmentation types: {augmentation_types}")
+        print(f"   This may take 15-30 minutes...")
+        print()
+    
+    for i, (wav_path, label_idx) in enumerate(zip(wav_files, labels_list)):
+        try:
+            if show_progress:
+                # Show progress more frequently (every 10 files or every 25 samples)
+                if (i + 1) % 10 == 0 or processed_count % 25 == 0:
+                    progress_pct = (i + 1) / len(wav_files) * 100
+                    print(f"   Progress: {i + 1}/{len(wav_files)} files ({progress_pct:.1f}%) | Samples created: {processed_count}/{total_files_to_process}")
+            
+            # Preprocess audio using standard pipeline
+            audio, sr = _preprocess_audio_file(str(wav_path), target_sr, target_duration_sec)
+            
+            # Process original + augmented versions
+            for aug_type in augmentation_types:
+                # Apply augmentation (if not 'none')
+                augmented_audio = augment_audio(audio.copy(), target_sr, aug_type)
+                
+                # Ensure length is still correct after augmentation
+                if len(augmented_audio) != target_samples:
+                    if len(augmented_audio) > target_samples:
+                        augmented_audio = augmented_audio[:target_samples]
+                    else:
+                        augmented_audio = np.pad(augmented_audio, (0, target_samples - len(augmented_audio)), mode='constant')
+                
+                # Extract extended features (MFCC + Chroma + Spectral)
+                feature_vector = extract_extended_features(augmented_audio, target_sr, n_mfcc)
+                
+                features_list.append(feature_vector)
+                valid_labels.append(label_idx)
+                processed_count += 1
+            
+        except Exception as e:
+            if show_progress:
+                print(f"   Warning: Error processing {wav_path.name}: {e}")
+            logger.warning(f'[VocalTone] Error processing {wav_path.name}: {e}')
+            continue
+    
+    if len(features_list) == 0:
+        raise ValueError('No valid audio files processed')
+    
+    # Convert to numpy arrays
+    X = np.array(features_list)  # Shape: (#samples, 80)
+    y = np.array(valid_labels)   # Shape: (#samples,)
+    
+    if show_progress:
+        print()
+        print(f"   Processing complete!")
+        print(f"   X shape: {X.shape} (#samples, #features)")
+        print(f"   y shape: {y.shape} (#samples,)")
+        print(f"   Features per sample: {X.shape[1]} (extended: MFCC + Chroma + Spectral)")
+        print(f"   Number of classes: {len(labels_map)}")
+        if use_augmentation:
+            print(f"   Dataset size increased from {len(wav_files)} to {X.shape[0]} samples (×{X.shape[0]/len(wav_files):.1f})")
+        logger.info(f'[VocalTone] Processing complete!')
+        logger.info(f'[VocalTone] X shape: {X.shape} (#samples, #features)')
+        logger.info(f'[VocalTone] y shape: {y.shape} (#samples,)')
+        logger.info(f'[VocalTone] Features per sample: {X.shape[1]} (extended: MFCC + Chroma + Spectral)')
+        logger.info(f'[VocalTone] Number of classes: {len(labels_map)}')
+        logger.info(f'[VocalTone] Samples per class:')
+        for label_idx, label_name in labels_map.items():
+            count = np.sum(y == label_idx)
+            logger.info(f'  {label_name}: {count} samples')
+    
+    return X, y, labels_map
+
+
 def analyze_audio_whisper(audio_bytes: bytes, session_id: str, chunk_index: int) -> Dict:
     """
     Transcribe audio using Whisper.
@@ -43,7 +542,7 @@ def analyze_audio_whisper(audio_bytes: bytes, session_id: str, chunk_index: int)
     TODO: Integrate actual Whisper model from /test/whisper_test.py
 
     Args:
-        audio_bytes: MP3 audio data
+        audio_bytes: WAV audio data
         session_id: Session identifier
         chunk_index: Chunk index within session
 
@@ -64,7 +563,7 @@ def analyze_audio_whisper(audio_bytes: bytes, session_id: str, chunk_index: int)
         logger.info(f'[Whisper] Start chunk {session_id}:{chunk_index}')
 
         if isinstance(audio_bytes, (bytes, bytearray)):
-            with tempfile.NamedTemporaryFile(suffix='.mp3', delete=False) as tmp_file:
+            with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as tmp_file:
                 tmp_file.write(audio_bytes)
                 temp_path = tmp_file.name
             logger.info(
@@ -565,63 +1064,283 @@ def analyze_vocal_tone(audio_bytes: bytes, session_id: str, chunk_index: int) ->
     """
     Analyze vocal characteristics: pitch, tempo, energy, and emotional tone.
 
-    TODO: Integrate actual vocal tone analysis model
+    Uses the trained Vocal Tone model to predict emotion from audio features.
 
     Args:
-        audio_bytes: MP3 audio data
+        audio_bytes: WAV audio data
         session_id: Session identifier
         chunk_index: Chunk index within session
 
     Returns:
         Dictionary with vocal analysis results:
         {
+            'emotion': str,
+            'confidence': float,
+            'emotion_probabilities': dict,
             'pitch_mean': float,
             'pitch_std': float,
             'tempo': float,
             'energy_level': float,
-            'valence': float,
-            'arousal': float,
-            'confidence_score': float,
             'processing_time_ms': int
         }
     """
     start_time = time.time()
+    temp_path = None
 
     try:
         logger.info(f'[VocalTone] Processing chunk {session_id}:{chunk_index} ({len(audio_bytes)} bytes)')
 
-        # TODO: Replace with actual vocal tone analysis
-        # Example integration:
-        # import librosa
-        # y, sr = librosa.load(audio_file)
-        # pitch = librosa.piptrack(y=y, sr=sr)
-        # tempo = librosa.beat.tempo(y=y, sr=sr)
+        # Create temporary WAV file from audio_bytes (same pattern as Whisper)
+        if isinstance(audio_bytes, (bytes, bytearray)):
+            with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as tmp_file:
+                tmp_file.write(audio_bytes)
+                temp_path = tmp_file.name
+            logger.info(
+                f'[VocalTone] Saved audio to temp file: {temp_path} '
+                f'({len(audio_bytes)} bytes)'
+            )
+            audio_source = temp_path
+        elif isinstance(audio_bytes, str):
+            audio_source = audio_bytes
+            logger.info(f'[VocalTone] Using audio path: {audio_source}')
+        else:
+            raise ValueError(f'Unsupported audio input type: {type(audio_bytes).__name__}')
 
-        # Placeholder implementation
-        time.sleep(0.08)  # Simulate processing time
+        # Load model files (lazy loading - only load once)
+        if not hasattr(analyze_vocal_tone, '_model'):
+            logger.info('[VocalTone] Loading model files (first use)...')
+            
+            # Use VOCAL_TONE_MODEL_DIR if set, else default backend/models/vocal_tone
+            if Config.VOCAL_TONE_MODEL_DIR:
+                models_dir = Path(Config.VOCAL_TONE_MODEL_DIR)
+            else:
+                backend_dir = Path(__file__).parent
+                models_dir = backend_dir / 'models' / 'vocal_tone'
+            model_path = models_dir / 'vocal_tone_model.pkl'
+            scaler_path = models_dir / 'vocal_tone_scaler.pkl'
+            labels_path = models_dir / 'vocal_tone_labels.pkl'
+
+            if not model_path.exists():
+                error_msg = f'Vocal Tone model not found: {model_path}. Please train the model first.'
+                logger.error(f'[VocalTone] {error_msg}')
+                return {
+                    'error': error_msg,
+                    'processing_time_ms': int((time.time() - start_time) * 1000)
+                }
+
+            try:
+                analyze_vocal_tone._model = joblib.load(model_path)
+                analyze_vocal_tone._scaler = joblib.load(scaler_path)
+                analyze_vocal_tone._labels_map = joblib.load(labels_path)
+                logger.info(f'[VocalTone] Model loaded: {type(analyze_vocal_tone._model).__name__}')
+                logger.info(f'[VocalTone] Labels: {len(analyze_vocal_tone._labels_map)} classes')
+            except Exception as e:
+                error_msg = f'Failed to load Vocal Tone model: {e}'
+                logger.error(f'[VocalTone] {error_msg}')
+                return {
+                    'error': error_msg,
+                    'processing_time_ms': int((time.time() - start_time) * 1000)
+                }
+
+        model = analyze_vocal_tone._model
+        scaler = analyze_vocal_tone._scaler
+        labels_map = analyze_vocal_tone._labels_map
+
+        # Process audio file: extract features (same as training)
+        target_sr = 16000
+        target_duration_sec = 3.0
+        n_mfcc = 40
+
+        logger.info(f'[VocalTone] Loading and processing audio: {audio_source}')
+
+        # Preprocess audio using standard pipeline
+        audio, sr = _preprocess_audio_file(audio_source, target_sr, target_duration_sec)
+
+        # Extract extended features (MFCC + Chroma + Spectral)
+        feature_vector = extract_extended_features(audio, sr, n_mfcc)
+        
+        logger.info(f'[VocalTone] Features extracted: shape {feature_vector.shape}')
+
+        # Scale features
+        features_scaled = scaler.transform([feature_vector])
+
+        # Predict emotion
+        prediction_idx = model.predict(features_scaled)[0]
+        probabilities = model.predict_proba(features_scaled)[0]
+
+        predicted_emotion = labels_map[prediction_idx]
+        confidence = probabilities[prediction_idx]
+
+        # Calculate additional audio features for richer output
+        # Pitch analysis
+        pitches, magnitudes = librosa.piptrack(y=audio, sr=target_sr)
+        pitch_values = []
+        for t in range(pitches.shape[1]):
+            index = magnitudes[:, t].argmax()
+            pitch = pitches[index, t]
+            if pitch > 0:
+                pitch_values.append(pitch)
+        
+        pitch_mean = float(np.mean(pitch_values)) if pitch_values else 0.0
+        pitch_std = float(np.std(pitch_values)) if pitch_values else 0.0
+
+        # Tempo (may be scalar or array depending on librosa version)
+        tempo, _ = librosa.beat.beat_track(y=audio, sr=target_sr)
+        if tempo is None:
+            tempo_value = 0.0
+        else:
+            t = np.atleast_1d(tempo).flat[0]
+            tempo_value = float(t)
+
+        # Energy level
+        energy = float(np.mean(librosa.feature.rms(y=audio)[0]))
+
+        # Build emotion probabilities dictionary
+        emotion_probs = {
+            labels_map[i]: float(prob) 
+            for i, prob in enumerate(probabilities)
+        }
 
         processing_time = int((time.time() - start_time) * 1000)
 
         result = {
-            'pitch_mean': 220.0,  # Hz
-            'pitch_std': 25.0,
-            'tempo': 120.0,  # BPM
-            'energy_level': 0.6,  # 0-1
-            'valence': 0.65,  # Emotional positivity (0-1)
-            'arousal': 0.58,  # Emotional intensity (0-1)
-            'confidence_score': 0.85,
+            'emotion': predicted_emotion,
+            'confidence': float(confidence),
+            'emotion_probabilities': emotion_probs,
+            'pitch_mean': pitch_mean,
+            'pitch_std': pitch_std,
+            'tempo': tempo_value,
+            'energy_level': energy,
             'processing_time_ms': processing_time
         }
 
-        logger.info(f'[VocalTone] Completed chunk {session_id}:{chunk_index} in {processing_time}ms')
+        logger.info(
+            f'[VocalTone] Completed chunk {session_id}:{chunk_index} in {processing_time}ms: '
+            f'emotion={predicted_emotion} (conf={confidence:.3f}), '
+            f'pitch={pitch_mean:.1f}Hz, tempo={tempo_value:.1f}BPM'
+        )
+
         return result
 
     except Exception as e:
-        logger.error(f'[VocalTone] Error processing chunk {session_id}:{chunk_index}: {e}')
+        logger.error(
+            f'[VocalTone] Error processing chunk {session_id}:{chunk_index}: {e}\n'
+            f'{traceback.format_exc()}'
+        )
         return {
             'error': str(e),
             'processing_time_ms': int((time.time() - start_time) * 1000)
         }
+    finally:
+        # Clean up temp file (same pattern as Whisper)
+        if temp_path and os.path.exists(temp_path):
+            try:
+                os.remove(temp_path)
+                logger.debug(f'[VocalTone] Removed temp file: {temp_path}')
+            except Exception as cleanup_error:
+                logger.warning(f'[VocalTone] Temp cleanup failed: {cleanup_error}')
+
+
+# =============================================================================
+# SUMMARY LOGGING
+# =============================================================================
+
+def log_chunk_summary(session_id: str, chunk_index: int, results: Dict):
+    """
+    Print a formatted summary of all model results for a chunk.
+    
+    Args:
+        session_id: Session identifier
+        chunk_index: Chunk index
+        results: Dictionary with all model results
+    """
+    logger.info('')
+    logger.info('=' * 80)
+    logger.info(f'CHUNK SUMMARY: {session_id}:{chunk_index}')
+    logger.info('=' * 80)
+
+    # Whisper results
+    if 'whisper' in results:
+        whisper_result = results['whisper']
+        if 'error' in whisper_result:
+            logger.info('[Whisper] Transcription: FAILED')
+            logger.info(f'   Error: {whisper_result["error"]}')
+        else:
+            transcript = whisper_result.get('transcript', '')
+            language = whisper_result.get('language', 'unknown')
+            confidence = whisper_result.get('confidence')
+            processing_time = whisper_result.get('processing_time_ms', 0)
+
+            logger.info('[Whisper] Transcription: SUCCESS')
+            if transcript:
+                # Truncate long transcripts for readability
+                display_transcript = transcript[:200] + '...' if len(transcript) > 200 else transcript
+                logger.info(f'   Transcript: "{display_transcript}"')
+            else:
+                logger.info('   Transcript: (no speech detected)')
+            logger.info(f'   Language: {language}')
+            if confidence is not None:
+                logger.info(f'   Confidence: {confidence:.3f}')
+            logger.info(f'   Processing time: {processing_time}ms')
+    
+    # MediaPipe results
+    if 'mediapipe' in results:
+        mediapipe_result = results['mediapipe']
+        if 'error' in mediapipe_result:
+            logger.info('[MediaPipe] Video Analysis: FAILED')
+            logger.info(f'   Error: {mediapipe_result["error"]}')
+        else:
+            emotion = mediapipe_result.get('dominant_emotion', 'unknown')
+            emotion_conf = mediapipe_result.get('emotion_confidence', 0)
+            posture = mediapipe_result.get('posture_score', 0)
+            engagement = mediapipe_result.get('engagement_score', 0)
+            hands = mediapipe_result.get('hand_gestures_detected', False)
+            frames = mediapipe_result.get('frames_analyzed', 0)
+            processing_time = mediapipe_result.get('processing_time_ms', 0)
+
+            logger.info('[MediaPipe] Video Analysis: SUCCESS')
+            logger.info(f'   Dominant Emotion: {emotion} (confidence: {emotion_conf:.2f})')
+            logger.info(f'   Posture Score: {posture:.2f}')
+            logger.info(f'   Engagement Score: {engagement:.2f}')
+            logger.info(f'   Hand Gestures: {"Yes" if hands else "No"}')
+            logger.info(f'   Frames Analyzed: {frames}')
+            logger.info(f'   Processing time: {processing_time}ms')
+    
+    # VocalTone results
+    if 'vocaltone' in results:
+        vocaltone_result = results['vocaltone']
+        if 'error' in vocaltone_result:
+            logger.info('[VocalTone] Audio Emotion: FAILED')
+            logger.info(f'   Error: {vocaltone_result["error"]}')
+        else:
+            emotion = vocaltone_result.get('emotion', 'unknown')
+            confidence = vocaltone_result.get('confidence', 0)
+            pitch_mean = vocaltone_result.get('pitch_mean', 0)
+            tempo = vocaltone_result.get('tempo', 0)
+            energy = vocaltone_result.get('energy_level', 0)
+            processing_time = vocaltone_result.get('processing_time_ms', 0)
+
+            logger.info('[VocalTone] Audio Emotion: SUCCESS')
+            logger.info(f'   Predicted Emotion: {emotion} (confidence: {confidence:.3f})')
+            logger.info(f'   Pitch Mean: {pitch_mean:.1f} Hz')
+            logger.info(f'   Tempo: {tempo:.1f} BPM')
+            logger.info(f'   Energy Level: {energy:.3f}')
+            logger.info(f'   Processing time: {processing_time}ms')
+    
+    # Overall summary
+    total_time = results.get('total_processing_time_ms', 0)
+    # Count successful models (exclude total_processing_time_ms which is an int)
+    model_keys = [k for k in results.keys() if k != 'total_processing_time_ms']
+    success_count = sum(1 for k in model_keys 
+                       if isinstance(results[k], dict) and 'error' not in results[k])
+    total_models = len(model_keys)
+    
+    logger.info('')
+    logger.info('─' * 80)
+    logger.info(f'Total Processing Time: {total_time}ms ({total_time/1000:.2f}s)')
+    logger.info(f'Success Rate: {success_count}/{total_models} models succeeded')
+    logger.info('=' * 80)
+    logger.info('')
 
 
 # =============================================================================
@@ -665,7 +1384,7 @@ def run_parallel_analysis(
 
     Args:
         video_bytes: MP4 video data
-        audio_bytes: MP3 audio data
+        audio_bytes: WAV audio data
         session_id: Session identifier
         chunk_index: Chunk index within session
         max_workers: Maximum parallel workers (default: None = auto-scale to model count)
@@ -727,12 +1446,17 @@ def run_parallel_analysis(
     total_time = int((time.time() - overall_start) * 1000)
     results['total_processing_time_ms'] = total_time
 
-    # Calculate success count
-    success_count = sum(1 for r in results.values() if isinstance(r, dict) and 'error' not in r)
-    total_models = len(MODEL_REGISTRY)
+    # Calculate success count (exclude total_processing_time_ms which is an int)
+    model_keys = [k for k in results.keys() if k != 'total_processing_time_ms']
+    success_count = sum(1 for k in model_keys 
+                       if isinstance(results[k], dict) and 'error' not in results[k])
+    total_models = len(model_keys)
     logger.info(
         f'Parallel analysis complete for chunk {session_id}:{chunk_index}: '
         f'{success_count}/{total_models} succeeded in {total_time}ms'
     )
+
+    # Print formatted summary
+    log_chunk_summary(session_id, chunk_index, results)
 
     return results

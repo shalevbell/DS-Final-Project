@@ -42,7 +42,7 @@ def store_chunk_in_redis(
         session_id: Session identifier
         chunk_index: Chunk index within session
         video_bytes: MP4 video data
-        audio_bytes: MP3 audio data
+        audio_bytes: WAV audio data
         metadata: Dictionary with chunk metadata (timestamp, mimeType, durationMs, etc.)
 
     Returns:
