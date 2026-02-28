@@ -305,6 +305,15 @@ body {
     padding-bottom: 8px;
 }
 
+.stream-header {
+    color: #6b7280;
+    font-weight: 600;
+    margin-bottom: 10px;
+    font-size: 12px;
+    border-bottom: 1px solid #e5e7eb;
+    padding-bottom: 8px;
+}
+
 .model-output {
     margin-bottom: 20px;
     padding-bottom: 20px;

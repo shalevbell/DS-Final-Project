@@ -155,6 +155,10 @@ class VideoApp {
         this.socket.on('chunk_results', (data) => {
             this.handleChunkResults(data);
         });
+        // Generic text streaming handler
+        this.socket.on('text_stream', (data) => {
+            this.handleTextStream(data);
+        });
     }
     
     sendWebSocketMessage(event, data = {}) {
@@ -420,129 +424,83 @@ class VideoApp {
     }
 
     /**
-     * Handle incoming chunk results from backend
+     * Handle generic text stream from backend
+     * @param {Object} data - { text, timestamp, sessionId?, metadata? }
      */
-    handleChunkResults(data) {
-        const { chunkIndex, results, timestamp } = data;
+    handleTextStream(data) {
+        const { text, timestamp, metadata } = data;
 
-        console.log(`[Output] Chunk ${chunkIndex} received - Models: ${Object.keys(results).join(', ')}`);
-
-        // Initialize TextStreamer if not already initialized
+        // Initialize TextStreamer if needed
         if (!this.textStreamer) {
             this.textStreamer = new TextStreamer(this.outputContent);
-            // Remove placeholder
             const placeholder = this.outputContent.querySelector('.output-placeholder');
             if (placeholder) {
                 placeholder.remove();
             }
         }
 
-        // Format header
-        const date = new Date(timestamp);
-        const timeStr = date.toLocaleTimeString();
-        const header = `\n${'─'.repeat(50)}\nChunk ${chunkIndex} | ${timeStr}\n${'─'.repeat(50)}\n\n`;
+        // Optional: Add header with metadata
+        if (metadata) {
+            const header = this.createMetadataHeader(metadata, timestamp);
+            this.textStreamer.addElement(header);
+        }
 
-        // Create header element
-        const headerElement = document.createElement('div');
-        headerElement.className = 'chunk-header';
-        headerElement.textContent = header;
-        this.textStreamer.addElement(headerElement);
-
-        // Stream each model's output
-        this.displayWhisperOutput(results.whisper);
-        this.displayMediaPipeOutput(results.mediapipe);
-        this.displayVocalToneOutput(results.vocal_tone);
+        // Stream the text
+        this.textStreamer.addText(text + '\n\n');
     }
 
     /**
-     * Display Whisper transcription
+     * Create a metadata header element for streamed text
+     * @param {Object} metadata - Metadata object (chunk, source, model, etc.)
+     * @param {string} timestamp - ISO timestamp string
+     * @returns {HTMLElement} Header element
      */
-    displayWhisperOutput(whisperData) {
-        if (!whisperData) return;
-
+    createMetadataHeader(metadata, timestamp) {
         const header = document.createElement('div');
-        header.className = 'model-name';
-        header.textContent = '🎤 TRANSCRIPTION';
-        this.textStreamer.addElement(header);
+        header.className = 'stream-header';
 
-        if (whisperData.error) {
-            console.error('[Whisper] Error:', whisperData.error);
-            this.textStreamer.addText(`Error: ${whisperData.error}\n\n`);
-        } else {
-            const text = whisperData.text || '(No speech detected)';
-            this.textStreamer.addText(text + '\n\n');
+        let headerText = '';
+        if (metadata.chunk !== undefined) {
+            headerText += `Chunk ${metadata.chunk}`;
         }
+        if (metadata.source) {
+            headerText += ` | ${metadata.source}`;
+        }
+        if (timestamp) {
+            const date = new Date(timestamp);
+            headerText += ` | ${date.toLocaleTimeString()}`;
+        }
+
+        if (headerText) {
+            header.textContent = '\n' + headerText + '\n';
+        }
+
+        return header;
     }
 
     /**
-     * Display MediaPipe analysis
+     * Handle incoming chunk results from backend
+     * Formats results as text and streams using generic handler
      */
-    displayMediaPipeOutput(mediapipeData) {
-        if (!mediapipeData) return;
+    handleChunkResults(data) {
+        const { chunkIndex, results, timestamp } = data;
 
-        const header = document.createElement('div');
-        header.className = 'model-name';
-        header.textContent = '👤 FACIAL & POSTURE';
-        this.textStreamer.addElement(header);
+        console.log(`[Output] Chunk ${chunkIndex} received - Models: ${Object.keys(results).join(', ')}`);
 
-        if (mediapipeData.error) {
-            console.error('[MediaPipe] Error:', mediapipeData.error);
-            this.textStreamer.addText(`Error: ${mediapipeData.error}\n\n`);
-        } else {
-            const emotion = mediapipeData.dominant_emotion || 'N/A';
-            const postureScore = mediapipeData.posture_score
-                ? (mediapipeData.posture_score * 100).toFixed(1) + '%'
-                : 'N/A';
-            const engagementScore = mediapipeData.engagement_score
-                ? (mediapipeData.engagement_score * 100).toFixed(1) + '%'
-                : 'N/A';
-            const framesAnalyzed = mediapipeData.frames_analyzed || 0;
-
-            const text = `Emotion: ${emotion}\n` +
-                        `Posture Score: ${postureScore}\n` +
-                        `Engagement: ${engagementScore}\n` +
-                        `Frames Analyzed: ${framesAnalyzed}\n\n`;
-            this.textStreamer.addText(text);
+        // Format results as text and stream
+        let text = '';
+        for (const [modelName, modelData] of Object.entries(results)) {
+            text += `[${modelName.toUpperCase()}]\n`;
+            text += JSON.stringify(modelData, null, 2) + '\n\n';
         }
+
+        this.handleTextStream({
+            text,
+            timestamp,
+            metadata: { chunk: chunkIndex, source: 'chunk_results' }
+        });
     }
 
-    /**
-     * Display VocalTone emotion analysis
-     */
-    displayVocalToneOutput(vocalToneData) {
-        if (!vocalToneData) return;
-
-        const header = document.createElement('div');
-        header.className = 'model-name';
-        header.textContent = '🎵 VOCAL EMOTION';
-        this.textStreamer.addElement(header);
-
-        if (vocalToneData.error) {
-            console.error('[VocalTone] Error:', vocalToneData.error);
-            this.textStreamer.addText(`Error: ${vocalToneData.error}\n\n`);
-        } else {
-            const emotion = vocalToneData.predicted_emotion || 'N/A';
-            const confidence = vocalToneData.confidence
-                ? (vocalToneData.confidence * 100).toFixed(1) + '%'
-                : 'N/A';
-            const energy = vocalToneData.energy_level
-                ? vocalToneData.energy_level.toFixed(3)
-                : 'N/A';
-            const pitch = vocalToneData.pitch_mean
-                ? vocalToneData.pitch_mean.toFixed(1) + ' Hz'
-                : 'N/A';
-            const tempo = vocalToneData.tempo
-                ? vocalToneData.tempo.toFixed(1) + ' BPM'
-                : 'N/A';
-
-            const text = `Emotion: ${emotion}\n` +
-                        `Confidence: ${confidence}\n` +
-                        `Energy Level: ${energy}\n` +
-                        `Pitch: ${pitch}\n` +
-                        `Tempo: ${tempo}\n\n`;
-            this.textStreamer.addText(text);
-        }
-    }
 }
 
 document.addEventListener('DOMContentLoaded', () => {

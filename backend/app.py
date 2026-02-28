@@ -20,6 +20,7 @@ from services.connection_manager import (
 )
 from routes.http_routes import register_http_routes
 from routes.websocket_handlers import register_socketio_handlers
+from services.text_streaming import stream_text
 
 # Configure logging
 logging.basicConfig(
@@ -67,6 +68,25 @@ register_socketio_handlers(socketio, Config)
 # Register signal handlers for graceful shutdown
 signal.signal(signal.SIGINT, create_shutdown_handler(chunk_processor))
 signal.signal(signal.SIGTERM, create_shutdown_handler(chunk_processor))
+
+
+def get_text_streamer():
+    """
+    Returns a partial function bound to the global socketio instance.
+
+    This allows any module to stream text without needing direct access
+    to the socketio instance.
+
+    Usage:
+        from app import get_text_streamer
+        streamer = get_text_streamer()
+        streamer("Hello from anywhere!", session_id="session-123")
+
+    Returns:
+        Partial function with socketio already bound
+    """
+    from functools import partial
+    return partial(stream_text, socketio)
 
 if __name__ == '__main__':
     logger.info(f"Starting Flask app with SocketIO on port 5000 (ENV: {Config.FLASK_ENV})")

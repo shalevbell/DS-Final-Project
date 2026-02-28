@@ -630,6 +630,12 @@ def analyze_audio_whisper(audio_bytes: bytes, session_id: str, chunk_index: int)
             'processing_time_ms': int(processing_time_sec * 1000)
         }
 
+        # Stream transcription to frontend
+        from services.text_streaming import stream_text
+        from app import socketio
+        text = f"{transcript_text or '(No speech detected)'}"
+        stream_text(socketio, text, session_id, {'source': 'whisper', 'chunk': chunk_index})
+
         return result
 
     except Exception as e:
@@ -1033,6 +1039,12 @@ def analyze_video_mediapipe(video_bytes: bytes, session_id: str, chunk_index: in
             f'posture: {avg_posture_score:.2f}, engagement: {engagement_score:.2f})'
         )
 
+        # Stream analysis to frontend
+        from services.text_streaming import stream_text
+        from app import socketio
+        text = f"{dominant_emotion} | Posture: {avg_posture_score:.0%} | Engagement: {engagement_score:.0%}"
+        stream_text(socketio, text, session_id, {'source': 'mediapipe', 'chunk': chunk_index})
+
         return result
 
     except Exception as e:
@@ -1205,6 +1217,12 @@ def analyze_vocal_tone(audio_bytes: bytes, session_id: str, chunk_index: int) ->
             f'emotion={predicted_emotion} (conf={confidence:.3f}), '
             f'pitch={pitch_mean:.1f}Hz, tempo={tempo_value:.1f}BPM'
         )
+
+        # Stream vocal analysis to frontend
+        from services.text_streaming import stream_text
+        from app import socketio
+        text = f"{predicted_emotion} ({confidence:.0%}) | Pitch: {pitch_mean:.0f}Hz | Tempo: {tempo_value:.0f}BPM"
+        stream_text(socketio, text, session_id, {'source': 'vocaltone', 'chunk': chunk_index})
 
         return result
 
