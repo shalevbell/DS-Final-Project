@@ -57,6 +57,10 @@ socketio = SocketIO(
     max_http_buffer_size=100 * 1024 * 1024
 )
 
+# Preload ML models before starting chunk processor
+from services.model_loader import preload_all_models
+model_status = preload_all_models()
+
 # Initialize services
 redis_client = get_redis_client()
 chunk_processor = initialize_chunk_processor(socketio_instance=socketio)

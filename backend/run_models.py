@@ -571,9 +571,9 @@ def analyze_audio_whisper(audio_bytes: bytes, session_id: str, chunk_index: int)
             raise ValueError(f'Unsupported audio input type: {type(audio_bytes).__name__}')
 
         if not hasattr(analyze_audio_whisper, '_model'):
-            logger.info(
-                f'[Whisper] Loading faster-whisper model "{Config.WHISPER_MODEL_NAME}" ({Config.WHISPER_DEVICE}). '
-                'First run can be slow due to model download.'
+            logger.warning(
+                '[Whisper] Model not preloaded! Loading now (this should not happen). '
+                f'Model: "{Config.WHISPER_MODEL_NAME}" ({Config.WHISPER_DEVICE})'
             )
             analyze_audio_whisper._model = WhisperModel(
                 Config.WHISPER_MODEL_NAME,
@@ -847,7 +847,7 @@ def analyze_video_mediapipe(video_bytes: bytes, session_id: str, chunk_index: in
 
         # Initialize MediaPipe models on first use (lazy loading)
         if not hasattr(analyze_video_mediapipe, '_landmarkers'):
-            logger.info('[MediaPipe] Initializing models (first use)...')
+            logger.warning('[MediaPipe] Models not preloaded! Initializing now (this should not happen).')
 
             # Create models directory
             models_dir = Path(Config.MEDIAPIPE_MODEL_DIR)
@@ -1110,7 +1110,7 @@ def analyze_vocal_tone(audio_bytes: bytes, session_id: str, chunk_index: int) ->
 
         # Load model files (lazy loading - only load once)
         if not hasattr(analyze_vocal_tone, '_model'):
-            logger.info('[VocalTone] Loading model files (first use)...')
+            logger.warning('[VocalTone] Model not preloaded! Loading now (this should not happen).')
             
             # Use VOCAL_TONE_MODEL_DIR if set, else default backend/models/vocal_tone
             if Config.VOCAL_TONE_MODEL_DIR:
