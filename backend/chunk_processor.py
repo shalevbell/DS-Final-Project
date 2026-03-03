@@ -10,6 +10,7 @@ import time
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from typing import Optional, Dict
+from datetime import datetime
 
 import redis
 import eventlet
@@ -42,7 +43,8 @@ class ChunkProcessor:
         max_workers: int = 3,
         queue_size: int = 100,
         pubsub_channel: str = 'chunks:ready',
-        reconnect_delay: int = 5
+        reconnect_delay: int = 5,
+        socketio_instance=None
     ):
         """
         Initialize chunk processor.
@@ -53,11 +55,13 @@ class ChunkProcessor:
             queue_size: Maximum queue size
             pubsub_channel: PUBSUB channel name
             reconnect_delay: Seconds to wait before reconnection attempt
+            socketio_instance: SocketIO instance for emitting events to frontend
         """
         self.redis_url = redis_url
         self.max_workers = max_workers
         self.pubsub_channel = pubsub_channel
         self.reconnect_delay = reconnect_delay
+        self.socketio = socketio_instance
 
         # Create separate Redis clients (PUBSUB requires dedicated connection)
         self.redis_pubsub_client: Optional[redis.Redis] = None
@@ -179,10 +183,9 @@ class ChunkProcessor:
                 logger.warning(f'Invalid PUBSUB message: {data}')
                 return
 
-            logger.info(
-                f'Received chunk notification: {session_id}:{chunk_index} '
-                f'(video={data.get("videoSize", 0)} bytes, audio={data.get("audioSize", 0)} bytes)'
-            )
+            video_kb = data.get("videoSize", 0) // 1024
+            audio_kb = data.get("audioSize", 0) // 1024
+            logger.info(f'[PUBSUB] Chunk {chunk_index} received - Video: {video_kb}KB, Audio: {audio_kb}KB')
 
             # Add to queue
             success = self.queue.add(session_id, chunk_index)
@@ -277,9 +280,8 @@ class ChunkProcessor:
             chunk_index: Chunk index within session
         """
         start_time = time.time()
-        
-        logger.info('----------------------------------------')
-        logger.info(f'Processing chunk {session_id}:{chunk_index}')
+
+        logger.info(f'[Processing] Chunk {chunk_index} - Starting parallel analysis')
 
         # 1. Update status to 'processing'
         self._set_status(session_id, chunk_index, 'processing')
@@ -316,7 +318,7 @@ class ChunkProcessor:
             if len(self.metrics['processing_times']) > 100:
                 self.metrics['processing_times'] = self.metrics['processing_times'][-100:]
 
-        logger.info(f'Completed chunk {session_id}:{chunk_index} in {processing_time}ms')
+        logger.info(f'[Processing] Chunk {chunk_index} completed in {processing_time}ms')
 
     def _get_chunk_data(self, session_id: str, chunk_index: int):
         """

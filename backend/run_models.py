@@ -560,27 +560,20 @@ def analyze_audio_whisper(audio_bytes: bytes, session_id: str, chunk_index: int)
     temp_path = None
 
     try:
-        logger.info(f'[Whisper] Start chunk {session_id}:{chunk_index}')
-
         if isinstance(audio_bytes, (bytes, bytearray)):
             with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as tmp_file:
                 tmp_file.write(audio_bytes)
                 temp_path = tmp_file.name
-            logger.info(
-                f'[Whisper] Saved audio to temp file: {temp_path} '
-                f'({len(audio_bytes)} bytes)'
-            )
             audio_source = temp_path
         elif isinstance(audio_bytes, str):
             audio_source = audio_bytes
-            logger.info(f'[Whisper] Using audio path: {audio_source}')
         else:
             raise ValueError(f'Unsupported audio input type: {type(audio_bytes).__name__}')
 
         if not hasattr(analyze_audio_whisper, '_model'):
-            logger.info(
-                f'[Whisper] Loading faster-whisper model "{Config.WHISPER_MODEL_NAME}" ({Config.WHISPER_DEVICE}). '
-                'First run can be slow due to model download.'
+            logger.warning(
+                '[Whisper] Model not preloaded! Loading now (this should not happen). '
+                f'Model: "{Config.WHISPER_MODEL_NAME}" ({Config.WHISPER_DEVICE})'
             )
             analyze_audio_whisper._model = WhisperModel(
                 Config.WHISPER_MODEL_NAME,
@@ -636,6 +629,12 @@ def analyze_audio_whisper(audio_bytes: bytes, session_id: str, chunk_index: int)
             'segments': segment_list,
             'processing_time_ms': int(processing_time_sec * 1000)
         }
+
+        # Stream transcription to frontend
+        from services.text_streaming import stream_text
+        from app import socketio
+        text = f"{transcript_text or '(No speech detected)'}"
+        stream_text(socketio, text, session_id, {'source': 'whisper', 'chunk': chunk_index})
 
         return result
 
@@ -843,11 +842,12 @@ def analyze_video_mediapipe(video_bytes: bytes, session_id: str, chunk_index: in
     temp_path = None
 
     try:
-        logger.info(f'[MediaPipe] Processing chunk {session_id}:{chunk_index} ({len(video_bytes)} bytes)')
+        video_kb = len(video_bytes) // 1024
+        logger.info(f'[MediaPipe] Analyzing video: {video_kb}KB')
 
         # Initialize MediaPipe models on first use (lazy loading)
         if not hasattr(analyze_video_mediapipe, '_landmarkers'):
-            logger.info('[MediaPipe] Initializing models (first use)...')
+            logger.warning('[MediaPipe] Models not preloaded! Initializing now (this should not happen).')
 
             # Create models directory
             models_dir = Path(Config.MEDIAPIPE_MODEL_DIR)
@@ -1039,6 +1039,12 @@ def analyze_video_mediapipe(video_bytes: bytes, session_id: str, chunk_index: in
             f'posture: {avg_posture_score:.2f}, engagement: {engagement_score:.2f})'
         )
 
+        # Stream analysis to frontend
+        from services.text_streaming import stream_text
+        from app import socketio
+        text = f"{dominant_emotion} | Posture: {avg_posture_score:.0%} | Engagement: {engagement_score:.0%}"
+        stream_text(socketio, text, session_id, {'source': 'mediapipe', 'chunk': chunk_index})
+
         return result
 
     except Exception as e:
@@ -1088,27 +1094,23 @@ def analyze_vocal_tone(audio_bytes: bytes, session_id: str, chunk_index: int) ->
     temp_path = None
 
     try:
-        logger.info(f'[VocalTone] Processing chunk {session_id}:{chunk_index} ({len(audio_bytes)} bytes)')
+        audio_kb = len(audio_bytes) // 1024
+        logger.info(f'[VocalTone] Analyzing audio: {audio_kb}KB')
 
         # Create temporary WAV file from audio_bytes (same pattern as Whisper)
         if isinstance(audio_bytes, (bytes, bytearray)):
             with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as tmp_file:
                 tmp_file.write(audio_bytes)
                 temp_path = tmp_file.name
-            logger.info(
-                f'[VocalTone] Saved audio to temp file: {temp_path} '
-                f'({len(audio_bytes)} bytes)'
-            )
             audio_source = temp_path
         elif isinstance(audio_bytes, str):
             audio_source = audio_bytes
-            logger.info(f'[VocalTone] Using audio path: {audio_source}')
         else:
             raise ValueError(f'Unsupported audio input type: {type(audio_bytes).__name__}')
 
         # Load model files (lazy loading - only load once)
         if not hasattr(analyze_vocal_tone, '_model'):
-            logger.info('[VocalTone] Loading model files (first use)...')
+            logger.warning('[VocalTone] Model not preloaded! Loading now (this should not happen).')
             
             # Use VOCAL_TONE_MODEL_DIR if set, else default backend/models/vocal_tone
             if Config.VOCAL_TONE_MODEL_DIR:
@@ -1151,15 +1153,11 @@ def analyze_vocal_tone(audio_bytes: bytes, session_id: str, chunk_index: int) ->
         target_duration_sec = 3.0
         n_mfcc = 40
 
-        logger.info(f'[VocalTone] Loading and processing audio: {audio_source}')
-
         # Preprocess audio using standard pipeline
         audio, sr = _preprocess_audio_file(audio_source, target_sr, target_duration_sec)
 
         # Extract extended features (MFCC + Chroma + Spectral)
         feature_vector = extract_extended_features(audio, sr, n_mfcc)
-        
-        logger.info(f'[VocalTone] Features extracted: shape {feature_vector.shape}')
 
         # Scale features
         features_scaled = scaler.transform([feature_vector])
@@ -1219,6 +1217,12 @@ def analyze_vocal_tone(audio_bytes: bytes, session_id: str, chunk_index: int) ->
             f'emotion={predicted_emotion} (conf={confidence:.3f}), '
             f'pitch={pitch_mean:.1f}Hz, tempo={tempo_value:.1f}BPM'
         )
+
+        # Stream vocal analysis to frontend
+        from services.text_streaming import stream_text
+        from app import socketio
+        text = f"{predicted_emotion} ({confidence:.0%}) | Pitch: {pitch_mean:.0f}Hz | Tempo: {tempo_value:.0f}BPM"
+        stream_text(socketio, text, session_id, {'source': 'vocaltone', 'chunk': chunk_index})
 
         return result
 

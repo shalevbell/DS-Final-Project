@@ -4,6 +4,86 @@
  * This file implements WebRTC camera functionality with WebSocket communication.
  */
 
+/**
+ * TextStreamer - Modular letter-by-letter text animator
+ */
+class TextStreamer {
+    constructor(containerElement) {
+        this.container = containerElement;
+        this.queue = []; // Queue of items (text or elements) to display
+        this.isStreaming = false;
+        this.streamSpeed = 15; // ms per character
+    }
+
+    /**
+     * Add text to streaming queue
+     * @param {string} text - Text to stream
+     * @param {string} className - CSS class for styling
+     */
+    addText(text, className = 'model-text') {
+        this.queue.push({ type: 'text', text, className });
+        if (!this.isStreaming) {
+            this.processQueue();
+        }
+    }
+
+    /**
+     * Add element to queue (will appear in order)
+     * @param {HTMLElement} element - DOM element to add
+     */
+    addElement(element) {
+        this.queue.push({ type: 'element', element });
+        if (!this.isStreaming) {
+            this.processQueue();
+        }
+    }
+
+    /**
+     * Process queue with letter-by-letter animation for text
+     */
+    async processQueue() {
+        if (this.queue.length === 0) {
+            this.isStreaming = false;
+            return;
+        }
+
+        this.isStreaming = true;
+        const item = this.queue.shift();
+
+        if (item.type === 'element') {
+            // Add element immediately
+            this.container.appendChild(item.element);
+        } else if (item.type === 'text') {
+            // Create container for this text segment
+            const textElement = document.createElement('div');
+            textElement.className = item.className;
+            this.container.appendChild(textElement);
+
+            // Stream letter by letter
+            for (let i = 0; i < item.text.length; i++) {
+                textElement.textContent += item.text[i];
+                await this.sleep(this.streamSpeed);
+            }
+        }
+
+        // Process next item
+        this.processQueue();
+    }
+
+    /**
+     * Clear all output
+     */
+    clear() {
+        this.queue = [];
+        this.isStreaming = false;
+        this.container.innerHTML = '';
+    }
+
+    sleep(ms) {
+        return new Promise(resolve => setTimeout(resolve, ms));
+    }
+}
+
 class VideoApp {
     constructor() {
         this.videoElement = document.getElementById('video-preview');
@@ -11,6 +91,8 @@ class VideoApp {
         this.toggleButton = document.getElementById('btn-toggle-camera');
         this.permissionInfo = document.getElementById('permission-info');
         this.cameraSelect = document.getElementById('camera-select');
+        this.clearOutputBtn = document.getElementById('clear-output-btn');
+        this.outputContent = document.getElementById('output-content');
         this.localStream = null;
         this.mediaRecorder = null;
         this.socket = null;
@@ -20,6 +102,7 @@ class VideoApp {
         this.isRecording = false;
         this.isCameraActive = false;
         this.chunkDurationMs = 30000;  // Default, will be overridden by backend
+        this.textStreamer = null;
 
         // Session-specific state (initialized when camera starts)
         this.sessionId = null;
@@ -69,6 +152,13 @@ class VideoApp {
                 console.log(`Chunk duration set to ${this.chunkDurationMs}ms`);
             }
         });
+        this.socket.on('chunk_results', (data) => {
+            this.handleChunkResults(data);
+        });
+        // Generic text streaming handler
+        this.socket.on('text_stream', (data) => {
+            this.handleTextStream(data);
+        });
     }
     
     sendWebSocketMessage(event, data = {}) {
@@ -83,6 +173,17 @@ class VideoApp {
                 this.stopCamera();
             } else {
                 this.startCamera();
+            }
+        });
+
+        this.clearOutputBtn.addEventListener('click', () => {
+            if (this.textStreamer) {
+                this.textStreamer.clear();
+                // Add placeholder back
+                const placeholder = document.createElement('div');
+                placeholder.className = 'output-placeholder';
+                placeholder.textContent = 'Analysis results will appear here after you start the camera...';
+                this.outputContent.appendChild(placeholder);
             }
         });
     }
@@ -321,6 +422,85 @@ class VideoApp {
         this.toggleButton.classList.add('btn-primary');
         this.sendWebSocketMessage('camera_error', { error: error.name, message: error.message });
     }
+
+    /**
+     * Handle generic text stream from backend
+     * @param {Object} data - { text, timestamp, sessionId?, metadata? }
+     */
+    handleTextStream(data) {
+        const { text, timestamp, metadata } = data;
+
+        // Initialize TextStreamer if needed
+        if (!this.textStreamer) {
+            this.textStreamer = new TextStreamer(this.outputContent);
+            const placeholder = this.outputContent.querySelector('.output-placeholder');
+            if (placeholder) {
+                placeholder.remove();
+            }
+        }
+
+        // Optional: Add header with metadata
+        if (metadata) {
+            const header = this.createMetadataHeader(metadata, timestamp);
+            this.textStreamer.addElement(header);
+        }
+
+        // Stream the text
+        this.textStreamer.addText(text + '\n\n');
+    }
+
+    /**
+     * Create a metadata header element for streamed text
+     * @param {Object} metadata - Metadata object (chunk, source, model, etc.)
+     * @param {string} timestamp - ISO timestamp string
+     * @returns {HTMLElement} Header element
+     */
+    createMetadataHeader(metadata, timestamp) {
+        const header = document.createElement('div');
+        header.className = 'stream-header';
+
+        let headerText = '';
+        if (metadata.chunk !== undefined) {
+            headerText += `Chunk ${metadata.chunk}`;
+        }
+        if (metadata.source) {
+            headerText += ` | ${metadata.source}`;
+        }
+        if (timestamp) {
+            const date = new Date(timestamp);
+            headerText += ` | ${date.toLocaleTimeString()}`;
+        }
+
+        if (headerText) {
+            header.textContent = '\n' + headerText + '\n';
+        }
+
+        return header;
+    }
+
+    /**
+     * Handle incoming chunk results from backend
+     * Formats results as text and streams using generic handler
+     */
+    handleChunkResults(data) {
+        const { chunkIndex, results, timestamp } = data;
+
+        console.log(`[Output] Chunk ${chunkIndex} received - Models: ${Object.keys(results).join(', ')}`);
+
+        // Format results as text and stream
+        let text = '';
+        for (const [modelName, modelData] of Object.entries(results)) {
+            text += `[${modelName.toUpperCase()}]\n`;
+            text += JSON.stringify(modelData, null, 2) + '\n\n';
+        }
+
+        this.handleTextStream({
+            text,
+            timestamp,
+            metadata: { chunk: chunkIndex, source: 'chunk_results' }
+        });
+    }
+
 }
 
 document.addEventListener('DOMContentLoaded', () => {
