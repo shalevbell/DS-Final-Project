@@ -1,0 +1,81 @@
+# Git
+.git
+.gitignore
+.gitattributes
+
+# Documentation
+README.md
+*.md
+!backend/clifton_model/README.md
+!backend/vocal_tone_model/README.md
+
+# CI/CD
+.github/
+.gitlab-ci.yml
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+ENV/
+env/
+.venv/
+*.egg-info/
+
+# Testing
+test/
+tests/
+*.test.js
+*.spec.js
+.pytest_cache/
+.coverage
+htmlcov/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Environment
+.env
+.env.local
+
+# Logs
+*.log
+logs/
+
+# Docker
+docker-compose*.yml
+Dockerfile
+.dockerignore
+
+# Large media files (exclude from build context)
+*.wav
+*.mp3
+*.mp4
+*.avi
+*.flac
+
+# Data (large files should be downloaded at runtime)
+data/raw/
+data/processed/
+dataset/
+Savee-Classifier/
+
+# ML Models (downloaded at runtime via entrypoint.sh)
+backend/clifton_model/models/*.pkl
+backend/clifton_model/*.zip
+backend/vocal_tone_model/models/*.pkl
+backend/vocal_tone_model/*.zip
+mediapipe_models/
+
+# Training data (keep this - it's needed for training)
+# backend/clifton_model/training_data/

@@ -11,13 +11,17 @@ services:
       REDIS_URL: redis://redis:6379/0
       EVENTLET_NO_GREENDNS: "yes"
       FLASK_ENV: development
+      # Training mode: Set to "1" to enable dataset download (only needed for model training)
+      # Leave at "0" for inference-only mode (saves startup time and bandwidth)
+      ENABLE_TRAINING: "0"
       # Dataset from Google Drive: ZIP file (full dataset) – file ID from share link
       DRIVE_DATASET_ZIP_ID: "1YLvn6CrpVG0fMl5DTojHzeObvCqsfKFw"
       # Force re-download and replace dataset (set to "1" only when you want to refresh, then run: docker-compose up -d --force-recreate)
       REFRESH_DATASET: "0"
-      # DRIVE_DATASET_FOLDER_ID: "150y55fRgvh8N6t8zy5potewjfEn4XHFS"  # fallback if not using ZIP
       # Vocal Tone: pre-trained model ZIP on Google Drive (vocal_tone_model.zip)
       DRIVE_VOCAL_TONE_MODEL_ZIP_ID: "1YbhpOas40kKZNHaPigMbP9WiWLbwvMdS"
+      # Clifton Fusion: pre-trained model ZIP on Google Drive (clifton_model.zip)
+      DRIVE_CLIFTON_MODEL_ZIP_ID: "1bOtsNSoDvZnMgPm_vEiltP3RFvcIJVMK"
     volumes:
       - ./backend:/app
       - ./frontend:/frontend

@@ -1112,12 +1112,12 @@ def analyze_vocal_tone(audio_bytes: bytes, session_id: str, chunk_index: int) ->
         if not hasattr(analyze_vocal_tone, '_model'):
             logger.warning('[VocalTone] Model not preloaded! Loading now (this should not happen).')
             
-            # Use VOCAL_TONE_MODEL_DIR if set, else default backend/models/vocal_tone
+            # Use VOCAL_TONE_MODEL_DIR if set, else default backend/vocal_tone_model/models
             if Config.VOCAL_TONE_MODEL_DIR:
                 models_dir = Path(Config.VOCAL_TONE_MODEL_DIR)
             else:
                 backend_dir = Path(__file__).parent
-                models_dir = backend_dir / 'models' / 'vocal_tone'
+                models_dir = backend_dir / 'vocal_tone_model' / 'models'
             model_path = models_dir / 'vocal_tone_model.pkl'
             scaler_path = models_dir / 'vocal_tone_scaler.pkl'
             labels_path = models_dir / 'vocal_tone_labels.pkl'
@@ -1245,6 +1245,82 @@ def analyze_vocal_tone(audio_bytes: bytes, session_id: str, chunk_index: int) ->
                 logger.warning(f'[VocalTone] Temp cleanup failed: {cleanup_error}')
 
 
+def analyze_clifton_fusion(
+    data_bytes: bytes,
+    session_id: str,
+    chunk_index: int,
+    dependencies: Optional[Dict] = None
+) -> Dict:
+    """
+    Clifton Strengths domain prediction from Whisper + VocalTone fusion.
+
+    Args:
+        data_bytes: Not used (fusion model only needs dependency outputs)
+        session_id: Session identifier
+        chunk_index: Chunk index
+        dependencies: Dict with {model_name: result_dict} from dependency models
+
+    Returns:
+        Dict with predicted_domain, confidence, domain_probabilities
+    """
+    start_time = time.time()
+    logger.info(f'[CliftonFusion] Processing session={session_id}, chunk={chunk_index}')
+
+    try:
+        # Validate dependencies
+        if not dependencies or 'whisper' not in dependencies or 'vocaltone' not in dependencies:
+            raise ValueError('Missing required dependencies: whisper, vocaltone')
+
+        whisper_result = dependencies['whisper']
+        vocaltone_result = dependencies['vocaltone']
+
+        # Check for errors in dependencies
+        if 'error' in whisper_result or 'error' in vocaltone_result:
+            raise ValueError('One or more dependency models failed')
+
+        # Lazy load model
+        if not hasattr(analyze_clifton_fusion, '_model'):
+            model_dir = os.path.join(os.path.dirname(__file__), 'clifton_model', 'models')
+
+            from clifton_model.fusion_model import CliftonFusionModel
+            analyze_clifton_fusion._model = CliftonFusionModel(model_dir)
+            logger.info('[CliftonFusion] Model instance created')
+
+        model = analyze_clifton_fusion._model
+
+        # Predict
+        prediction = model.predict(whisper_result, vocaltone_result)
+
+        processing_time = int((time.time() - start_time) * 1000)
+        result = {
+            **prediction,
+            'processing_time_ms': processing_time
+        }
+
+        logger.info(
+            f'[CliftonFusion] Completed chunk {session_id}:{chunk_index} in {processing_time}ms: '
+            f'domain={prediction["predicted_domain"]} (conf={prediction["confidence"]:.3f})'
+        )
+
+        # Stream to frontend
+        from services.text_streaming import stream_text
+        from app import socketio
+
+        domain = prediction['predicted_domain']
+        confidence = prediction['confidence']
+        text = f"Clifton Domain: {domain} ({confidence:.0%})"
+        stream_text(socketio, text, session_id, {'source': 'clifton_fusion', 'chunk': chunk_index})
+
+        return result
+
+    except Exception as e:
+        logger.error(f'[CliftonFusion] Error: {e}', exc_info=True)
+        return {
+            'error': str(e),
+            'processing_time_ms': int((time.time() - start_time) * 1000)
+        }
+
+
 # =============================================================================
 # SUMMARY LOGGING
 # =============================================================================
@@ -1330,7 +1406,29 @@ def log_chunk_summary(session_id: str, chunk_index: int, results: Dict):
             logger.info(f'   Tempo: {tempo:.1f} BPM')
             logger.info(f'   Energy Level: {energy:.3f}')
             logger.info(f'   Processing time: {processing_time}ms')
-    
+
+    # Clifton Fusion results
+    if 'clifton_fusion' in results:
+        clifton_result = results['clifton_fusion']
+        if 'error' in clifton_result:
+            logger.info('[CliftonFusion] Strengths Domain: FAILED')
+            logger.info(f'   Error: {clifton_result["error"]}')
+        else:
+            domain = clifton_result.get('predicted_domain', 'unknown')
+            confidence = clifton_result.get('confidence', 0)
+            domain_probs = clifton_result.get('domain_probabilities', {})
+            processing_time = clifton_result.get('processing_time_ms', 0)
+
+            logger.info('[CliftonFusion] Clifton Strengths Domain: SUCCESS')
+            logger.info(f'   Predicted Domain: {domain} (confidence: {confidence:.3f})')
+            if domain_probs:
+                # Show all domain probabilities sorted by score
+                sorted_domains = sorted(domain_probs.items(), key=lambda x: x[1], reverse=True)
+                logger.info('   Domain Probabilities:')
+                for dom, prob in sorted_domains:
+                    logger.info(f'      {dom}: {prob:.3f}')
+            logger.info(f'   Processing time: {processing_time}ms')
+
     # Overall summary
     total_time = results.get('total_processing_time_ms', 0)
     # Count successful models (exclude total_processing_time_ms which is an int)
@@ -1356,19 +1454,28 @@ def log_chunk_summary(session_id: str, chunk_index: int, results: Dict):
 # 2. Add an entry here mapping model name to:
 #    - 'function': The analysis function to call
 #    - 'data_type': Either 'audio' or 'video' - specifies which bytes to pass to the function
+#    - 'depends_on': List of model names that must complete before this model runs (optional)
 #
 MODEL_REGISTRY = {
     'whisper': {
         'function': analyze_audio_whisper,
-        'data_type': 'audio'
+        'data_type': 'audio',
+        'depends_on': []  # Independent model
     },
     'mediapipe': {
         'function': analyze_video_mediapipe,
-        'data_type': 'video'
+        'data_type': 'video',
+        'depends_on': []  # Independent model
     },
     'vocaltone': {
         'function': analyze_vocal_tone,
-        'data_type': 'audio'
+        'data_type': 'audio',
+        'depends_on': []  # Independent model
+    },
+    'clifton_fusion': {
+        'function': analyze_clifton_fusion,
+        'data_type': 'audio',  # Doesn't actually use audio_bytes, but needs a value
+        'depends_on': ['whisper', 'vocaltone']  # Runs after whisper and vocaltone
     }
 }
 
@@ -1382,16 +1489,17 @@ def run_parallel_analysis(
     timeout: int = 60
 ) -> Dict:
     """
-    Run all analysis functions in parallel using ThreadPoolExecutor.
+    Run all analysis functions with dependency support.
 
-    This provides function-level parallelism within a single chunk.
+    Models with dependencies run AFTER their dependencies complete.
+    Independent models run in parallel for optimal performance.
 
     Args:
         video_bytes: MP4 video data
         audio_bytes: WAV audio data
         session_id: Session identifier
         chunk_index: Chunk index within session
-        max_workers: Maximum parallel workers (default: None = auto-scale to model count)
+        max_workers: Maximum parallel workers (default: None = auto-scale to independent model count)
         timeout: Timeout in seconds per function (default: 60)
 
     Returns:
@@ -1400,24 +1508,37 @@ def run_parallel_analysis(
             'whisper': dict,
             'mediapipe': dict,
             'vocaltone': dict,
+            'clifton_fusion': dict,
             'total_processing_time_ms': int
         }
     """
     overall_start = time.time()
 
-    logger.info(f'Running parallel analysis for chunk {session_id}:{chunk_index}')
+    logger.info(f'Running analysis for chunk {session_id}:{chunk_index}')
 
     results = {}
 
-    # Auto-scale max_workers to match number of models
+    # Phase 1: Identify independent and dependent models
+    independent_models = {}
+    dependent_models = {}
+
+    for model_name, model_config in MODEL_REGISTRY.items():
+        if not model_config.get('depends_on', []):
+            independent_models[model_name] = model_config
+        else:
+            dependent_models[model_name] = model_config
+
+    logger.debug(f'Independent models: {list(independent_models.keys())}')
+    logger.debug(f'Dependent models: {list(dependent_models.keys())}')
+
+    # Phase 2: Run independent models in parallel
     if max_workers is None:
-        max_workers = len(MODEL_REGISTRY)
-        logger.debug(f'Auto-scaled max_workers to {max_workers} (matches model count)')
+        max_workers = len(independent_models)
+        logger.debug(f'Auto-scaled max_workers to {max_workers} (independent models)')
 
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
-        # Dynamically build futures from MODEL_REGISTRY
         futures = {}
-        for model_name, model_config in MODEL_REGISTRY.items():
+        for model_name, model_config in independent_models.items():
             func = model_config['function']
             data_type = model_config['data_type']
 
@@ -1426,7 +1547,7 @@ def run_parallel_analysis(
 
             futures[model_name] = executor.submit(func, data_bytes, session_id, chunk_index)
 
-        # Collect results as they complete
+        # Collect independent results
         for name, future in futures.items():
             try:
                 result = future.result(timeout=timeout)
@@ -1446,6 +1567,62 @@ def run_parallel_analysis(
             except Exception as e:
                 logger.error(f'[{name}] Exception for chunk {session_id}:{chunk_index}: {e}')
                 results[name] = {'error': str(e)}
+
+    # Phase 3: Run dependent models sequentially
+    for model_name, model_config in dependent_models.items():
+        func = model_config['function']
+        dependencies = model_config.get('depends_on', [])
+
+        # Build dependency dict
+        dep_results = {dep: results.get(dep, {}) for dep in dependencies}
+
+        # Check if all dependencies succeeded
+        missing_deps = [dep for dep in dependencies if dep not in results]
+        failed_deps = [dep for dep in dependencies if 'error' in results.get(dep, {})]
+
+        if missing_deps:
+            error_msg = f'Missing dependencies: {missing_deps}'
+            logger.error(f'[{model_name}] {error_msg}')
+            results[model_name] = {
+                'error': error_msg,
+                'processing_time_ms': 0
+            }
+            continue
+
+        if failed_deps:
+            error_msg = f'Failed dependencies: {failed_deps}'
+            logger.warning(f'[{model_name}] {error_msg}')
+            results[model_name] = {
+                'error': error_msg,
+                'processing_time_ms': 0
+            }
+            continue
+
+        try:
+            # Call with dependencies parameter
+            data_type = model_config['data_type']
+            data_bytes = audio_bytes if data_type == 'audio' else video_bytes
+
+            result = func(
+                data_bytes,
+                session_id,
+                chunk_index,
+                dependencies=dep_results
+            )
+            results[model_name] = result
+
+            # Log success or error
+            if 'error' in result:
+                logger.warning(f'[{model_name}] Failed for chunk {session_id}:{chunk_index}: {result["error"]}')
+            else:
+                logger.debug(f'[{model_name}] Succeeded for chunk {session_id}:{chunk_index}')
+
+        except Exception as e:
+            logger.error(f'[{model_name}] Exception for chunk {session_id}:{chunk_index}: {e}')
+            results[model_name] = {
+                'error': str(e),
+                'processing_time_ms': 0
+            }
 
     total_time = int((time.time() - overall_start) * 1000)
     results['total_processing_time_ms'] = total_time
