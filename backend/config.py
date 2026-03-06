@@ -87,3 +87,8 @@ class Config:
     # SAVEE dataset path for Vocal Tone training (folder with anger/, disgust/, fear/, etc.)
     # When running locally (not in Docker), set this to your local path so train_model.py finds the data
     SAVEE_DATASET_PATH = os.getenv("SAVEE_DATASET_PATH", "")
+
+    # Clifton Fusion model configuration
+    # Threshold below which a domain is considered a development opportunity
+    # Default: 0.15 (below 60% of even distribution across 4 domains)
+    CLIFTON_DEVELOPMENT_THRESHOLD = float(os.getenv("CLIFTON_DEVELOPMENT_THRESHOLD", "0.15"))

@@ -4,7 +4,7 @@ Clifton Strengths domain classifier using Whisper + VocalTone fusion.
 import os
 import pickle
 import logging
-from typing import Dict
+from typing import Dict, Optional
 import numpy as np
 
 logger = logging.getLogger(__name__)
@@ -33,11 +33,18 @@ class CliftonFusionModel:
         'angry': 0.0
     }
 
-    def __init__(self, model_dir: str):
+    def __init__(self, model_dir: str, development_threshold: Optional[float] = None):
         self.model_dir = model_dir
         self.model = None
         self.scaler = None
         self.label_encoder = None
+
+        # Use config value if not explicitly provided
+        if development_threshold is None:
+            from config import Config
+            development_threshold = Config.CLIFTON_DEVELOPMENT_THRESHOLD
+
+        self.development_threshold = development_threshold
 
     def load_model(self):
         """Lazy load model from disk."""
@@ -117,8 +124,18 @@ class CliftonFusionModel:
 
         confidence = probabilities[predicted_idx]
 
+        # Identify development opportunities (domains with low probabilities)
+        development_opportunities = [
+            domain for domain, prob in domain_probs.items()
+            if prob < self.development_threshold
+        ]
+
+        # Sort by probability (lowest first) for prioritization
+        development_opportunities.sort(key=lambda d: domain_probs[d])
+
         return {
             'predicted_domain': predicted_domain,
             'confidence': float(confidence),
-            'domain_probabilities': domain_probs
+            'domain_probabilities': domain_probs,
+            'development_opportunities': development_opportunities
         }
