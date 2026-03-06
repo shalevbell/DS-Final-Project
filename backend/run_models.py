@@ -685,19 +685,19 @@ def _download_mediapipe_model(model_name: str, url: str, models_dir: Path) -> bo
 
 def _analyze_face_simple(face_landmarks_list: List) -> Dict:
     """
-    Simplified facial analysis for emotion detection.
+    Improved facial analysis with emotion intensity scoring.
 
     Args:
         face_landmarks_list: List of detected face landmarks
 
     Returns:
-        Dictionary with emotion and confidence
+        Dictionary with emotion, intensity, confidence, and detected flag
     """
     if not face_landmarks_list or len(face_landmarks_list) == 0:
-        return {'emotion': 'neutral', 'confidence': 0.0, 'detected': False}
+        return {'emotion': 'neutral', 'confidence': 0.0, 'intensity': 0.0, 'detected': False}
 
     face_landmarks = face_landmarks_list[0]
-    emotions = []
+    emotion_scores = {}  # Track emotion intensities
 
     try:
         # Mouth analysis for smile/frown
@@ -707,86 +707,176 @@ def _analyze_face_simple(face_landmarks_list: List) -> Dict:
         right_mouth_corner = face_landmarks[291]
 
         mouth_height = abs(upper_lip.y - lower_lip.y)
+        mouth_width = abs(left_mouth_corner.x - right_mouth_corner.x)
+        mouth_aspect_ratio = mouth_height / mouth_width if mouth_width > 0 else 0
         mouth_center_y = (upper_lip.y + lower_lip.y) / 2
         corners_avg_y = (left_mouth_corner.y + right_mouth_corner.y) / 2
         smile_ratio = mouth_center_y - corners_avg_y
 
-        if smile_ratio > 0.01:
-            emotions.append('happy')
-        elif smile_ratio < -0.01:
-            emotions.append('sad')
+        # Eye analysis
+        left_eye_top = face_landmarks[159]
+        left_eye_bottom = face_landmarks[145]
+        right_eye_top = face_landmarks[386]
+        right_eye_bottom = face_landmarks[374]
 
-        if mouth_height > 0.04:
-            emotions.append('surprised')
+        left_eye_height = abs(left_eye_top.y - left_eye_bottom.y)
+        right_eye_height = abs(right_eye_top.y - right_eye_bottom.y)
+        avg_eye_openness = (left_eye_height + right_eye_height) / 2
 
         # Eyebrow analysis
         left_eyebrow = face_landmarks[70]
         right_eyebrow = face_landmarks[300]
-        left_eye_top = face_landmarks[159]
-        right_eye_top = face_landmarks[386]
 
-        avg_brow_distance = (abs(left_eyebrow.y - left_eye_top.y) +
-                            abs(right_eyebrow.y - right_eye_top.y)) / 2
+        left_brow_distance = abs(left_eyebrow.y - left_eye_top.y)
+        right_brow_distance = abs(right_eyebrow.y - right_eye_top.y)
+        avg_brow_distance = (left_brow_distance + right_brow_distance) / 2
 
+        # Smile detection (wider threshold, intensity-based)
+        if smile_ratio > 0.003:
+            smile_intensity = min(abs(smile_ratio) / 0.02, 1.0)
+            if mouth_aspect_ratio < 0.15:
+                # Closed mouth smile
+                emotion_scores['happy'] = smile_intensity * 0.9
+            else:
+                # Open mouth smile
+                emotion_scores['happy'] = smile_intensity
+
+        # Frown detection
+        if smile_ratio < -0.003:
+            frown_intensity = min(abs(smile_ratio) / 0.02, 1.0)
+            emotion_scores['sad'] = frown_intensity
+
+        # Surprise detection (open mouth + wide eyes)
+        if mouth_aspect_ratio > 0.3:
+            surprise_intensity = min(mouth_aspect_ratio / 0.5, 1.0)
+            emotion_scores['surprised'] = surprise_intensity
+        elif avg_eye_openness > 0.02:
+            wide_eye_intensity = min(avg_eye_openness / 0.03, 1.0)
+            emotion_scores['surprised'] = max(emotion_scores.get('surprised', 0), wide_eye_intensity * 0.7)
+
+        # Concentration/skepticism (squinting)
+        if avg_eye_openness < 0.01 and 'happy' not in emotion_scores:
+            emotion_scores['concentrated'] = 0.6
+
+        # Raised eyebrows + context
         if avg_brow_distance > 0.06:
-            emotions.append('surprised')
+            if 'happy' in emotion_scores:
+                # Raised brows + smile = excited/engaged
+                emotion_scores['excited'] = min(emotion_scores['happy'] + 0.2, 1.0)
+                del emotion_scores['happy']
+            elif 'sad' in emotion_scores:
+                # Raised brows + frown = concerned
+                emotion_scores['concerned'] = emotion_scores['sad']
+                del emotion_scores['sad']
+            else:
+                # Just raised brows = surprised or engaged
+                emotion_scores['engaged'] = min(avg_brow_distance / 0.08, 1.0) * 0.8
 
-        # Default to neutral if no strong emotion
-        if not emotions:
-            emotions.append('neutral')
-        else:
-            emotions.append('engaged')
+        # Lowered brows + frown = angry/frustrated
+        if avg_brow_distance < 0.03 and 'sad' in emotion_scores:
+            emotion_scores['frustrated'] = emotion_scores['sad']
+            del emotion_scores['sad']
 
-        # Get most common emotion
-        emotion_counts = Counter(emotions)
-        dominant_emotion = emotion_counts.most_common(1)[0][0]
-        confidence = min(emotion_counts[dominant_emotion] / len(emotions), 1.0)
+        # Default to neutral if no emotions detected
+        if not emotion_scores:
+            return {
+                'emotion': 'neutral',
+                'confidence': 0.5,
+                'intensity': 0.5,
+                'detected': True
+            }
+
+        # Return strongest emotion by intensity
+        dominant_emotion = max(emotion_scores.items(), key=lambda x: x[1])[0]
+        intensity = emotion_scores[dominant_emotion]
+        confidence = min(intensity * 1.2, 1.0)  # Scale intensity to confidence
 
         return {
             'emotion': dominant_emotion,
             'confidence': confidence,
+            'intensity': intensity,
             'detected': True,
-            'all_emotions': list(set(emotions))
+            'all_emotions': list(emotion_scores.keys())
         }
 
     except Exception as e:
         logger.debug(f'[MediaPipe] Face analysis error: {e}')
-        return {'emotion': 'neutral', 'confidence': 0.0, 'detected': True}
+        return {'emotion': 'neutral', 'confidence': 0.0, 'intensity': 0.0, 'detected': True}
 
 
 def _analyze_posture_simple(pose_landmarks_list: List) -> Dict:
     """
-    Simplified posture analysis.
+    Multi-dimensional posture analysis.
+
+    Analyzes:
+    - Lateral lean (shoulders vs hips alignment)
+    - Head tilt (ear symmetry)
+    - Forward/backward lean (z-axis depth)
+    - Shoulder symmetry (height difference)
 
     Args:
         pose_landmarks_list: List of detected pose landmarks
 
     Returns:
-        Dictionary with posture score
+        Dictionary with posture score and detected flag
     """
     if not pose_landmarks_list or len(pose_landmarks_list) == 0:
         return {'score': 0.5, 'detected': False}
 
     pose_landmarks = pose_landmarks_list[0]
-    score = 0.5  # Default fair posture
+    score = 0.7  # Start at neutral (not poor posture)
 
     try:
+        # Get key landmarks
+        nose = pose_landmarks[0]
+        left_ear = pose_landmarks[7]
+        right_ear = pose_landmarks[8]
         left_shoulder = pose_landmarks[11]
         right_shoulder = pose_landmarks[12]
         left_hip = pose_landmarks[23]
         right_hip = pose_landmarks[24]
 
-        # Check body lean
+        # 1. Lateral lean (shoulders vs hips)
         shoulder_center_x = (left_shoulder.x + right_shoulder.x) / 2
         hip_center_x = (left_hip.x + right_hip.x) / 2
-        lean = abs(shoulder_center_x - hip_center_x)
+        lateral_lean = abs(shoulder_center_x - hip_center_x)
 
-        if lean < 0.03:
-            score = 0.9  # Good upright posture
-        elif lean < 0.08:
-            score = 0.6  # Fair posture
+        if lateral_lean < 0.03:
+            score += 0.15  # Good alignment
+        elif lateral_lean < 0.08:
+            pass  # Neutral, no change
         else:
-            score = 0.3  # Poor posture
+            score -= 0.2  # Leaning too far
+
+        # 2. Head tilt (ear symmetry)
+        head_tilt = abs(left_ear.y - right_ear.y)
+        if head_tilt > 0.1:
+            score -= 0.2  # Excessive head tilt
+        elif head_tilt < 0.03:
+            score += 0.1  # Good head alignment
+
+        # 3. Forward/backward lean (z-axis depth if available)
+        if hasattr(nose, 'z') and hasattr(left_shoulder, 'z'):
+            nose_z = nose.z
+            shoulder_z = (left_shoulder.z + right_shoulder.z) / 2 if hasattr(right_shoulder, 'z') else left_shoulder.z
+            forward_lean = abs(nose_z - shoulder_z)
+
+            if forward_lean > 0.3:
+                score -= 0.3  # Leaning too far forward (poor posture)
+            elif forward_lean < 0.1:
+                score -= 0.1  # Leaning backward
+            else:
+                score += 0.05  # Good forward alignment
+
+        # 4. Shoulder symmetry (height difference)
+        shoulder_height_diff = abs(left_shoulder.y - right_shoulder.y)
+        if shoulder_height_diff > 0.08:
+            score -= 0.2  # Uneven shoulders
+        elif shoulder_height_diff < 0.03:
+            score += 0.1  # Level shoulders
+
+        # Clamp score to valid range [0.0, 1.0]
+        score = max(0.0, min(1.0, score))
 
         return {'score': score, 'detected': True}
 
@@ -795,22 +885,106 @@ def _analyze_posture_simple(pose_landmarks_list: List) -> Dict:
         return {'score': 0.5, 'detected': True}
 
 
-def _analyze_hands_simple(hand_landmarks_list: List) -> Dict:
+def _analyze_hands_simple(hand_landmarks_list: List, face_landmarks_list: Optional[List] = None) -> Dict:
     """
-    Simplified hand gesture analysis.
+    Rich hand gesture analysis.
+
+    Detects:
+    - Hand openness (fingers extended vs fist)
+    - Pointing gestures
+    - Hand proximity to face (thinking/nervous gestures)
+    - Overall gesture expressiveness
 
     Args:
         hand_landmarks_list: List of detected hand landmarks
+        face_landmarks_list: Optional face landmarks for proximity detection
 
     Returns:
-        Dictionary with hand gesture info
+        Dictionary with gesture details
     """
     if not hand_landmarks_list or len(hand_landmarks_list) == 0:
-        return {'detected': False, 'count': 0}
+        return {'detected': False, 'count': 0, 'gestures': {}}
+
+    def _is_hand_open(hand_landmarks):
+        """Check if hand is open (fingers extended) or closed (fist)."""
+        try:
+            # Fingertip landmarks: thumb(4), index(8), middle(12), ring(16), pinky(20)
+            # Wrist: 0
+            thumb_tip = hand_landmarks[4]
+            index_tip = hand_landmarks[8]
+            middle_tip = hand_landmarks[12]
+            ring_tip = hand_landmarks[16]
+            pinky_tip = hand_landmarks[20]
+            wrist = hand_landmarks[0]
+
+            # Calculate distances from wrist to fingertips
+            fingertip_distances = []
+            for tip in [thumb_tip, index_tip, middle_tip, ring_tip, pinky_tip]:
+                dist = ((tip.x - wrist.x)**2 + (tip.y - wrist.y)**2)**0.5
+                fingertip_distances.append(dist)
+
+            avg_distance = sum(fingertip_distances) / len(fingertip_distances)
+            return avg_distance > 0.3  # Threshold for "open hand"
+        except:
+            return False
+
+    def _is_pointing(hand_landmarks):
+        """Check if index finger is extended while other fingers are curled."""
+        try:
+            index_tip = hand_landmarks[8]
+            index_mcp = hand_landmarks[5]  # Metacarpophalangeal joint
+            middle_tip = hand_landmarks[12]
+            middle_mcp = hand_landmarks[9]
+
+            index_extended = abs(index_tip.y - index_mcp.y) > 0.15
+            middle_curled = abs(middle_tip.y - middle_mcp.y) < 0.1
+
+            return index_extended and middle_curled
+        except:
+            return False
+
+    def _hand_near_face(hand_landmarks, face_landmarks_list):
+        """Check if hand is near face (potential nervous gesture or thinking pose)."""
+        if not face_landmarks_list or len(face_landmarks_list) == 0:
+            return False
+
+        try:
+            hand_center = hand_landmarks[9]  # Middle finger MCP
+            face_landmarks = face_landmarks_list[0]
+            face_center = face_landmarks[1]  # Nose tip
+
+            distance = ((hand_center.x - face_center.x)**2 +
+                       (hand_center.y - face_center.y)**2)**0.5
+
+            return distance < 0.2  # Hand within 20% of frame from face
+        except:
+            return False
+
+    # Analyze each hand
+    open_count = 0
+    pointing_count = 0
+    near_face_count = 0
+
+    for hand_landmarks in hand_landmarks_list:
+        if _is_hand_open(hand_landmarks):
+            open_count += 1
+        if _is_pointing(hand_landmarks):
+            pointing_count += 1
+        if _hand_near_face(hand_landmarks, face_landmarks_list):
+            near_face_count += 1
+
+    # Determine if gestures are active/expressive
+    active = open_count > 0 or pointing_count > 0
 
     return {
         'detected': True,
-        'count': len(hand_landmarks_list)
+        'count': len(hand_landmarks_list),
+        'gestures': {
+            'open_hands': open_count,
+            'pointing': pointing_count,
+            'near_face': near_face_count,
+            'active': active
+        }
     }
 
 
@@ -970,30 +1144,55 @@ def analyze_video_mediapipe(video_bytes: bytes, session_id: str, chunk_index: in
 
         cap.release()
 
-        # Analyze aggregated results
-        emotions_list = []
+        # Analyze aggregated results with intensity-weighted emotion scoring
+        face_analyses = []
+        emotion_scores = {}  # Track emotion intensities
         emotion_confidences = []
         posture_scores = []
+        hand_gestures = {
+            'open_hands': 0,
+            'pointing': 0,
+            'near_face': 0,
+            'active': False
+        }
         hand_detected_count = 0
 
+        # Analyze face landmarks with intensity scoring
         for face_landmarks in all_face_results:
             face_analysis = _analyze_face_simple(face_landmarks)
             if face_analysis['detected']:
-                emotions_list.append(face_analysis['emotion'])
+                face_analyses.append(face_analysis)
+                emotion = face_analysis['emotion']
+                intensity = face_analysis.get('intensity', 1.0)
+                emotion_scores[emotion] = emotion_scores.get(emotion, 0) + intensity
                 emotion_confidences.append(face_analysis['confidence'])
 
+        # Analyze posture
         for pose_landmarks in all_pose_results:
             posture_analysis = _analyze_posture_simple(pose_landmarks)
             if posture_analysis['detected']:
                 posture_scores.append(posture_analysis['score'])
 
-        for hand_landmarks in all_hand_results:
-            hand_analysis = _analyze_hands_simple(hand_landmarks)
+        # Analyze hands with rich gesture detection (pass face landmarks for proximity)
+        for i, hand_landmarks in enumerate(all_hand_results):
+            # Get corresponding face landmarks if available
+            face_landmarks = all_face_results[i] if i < len(all_face_results) else None
+            hand_analysis = _analyze_hands_simple(hand_landmarks, face_landmarks)
             if hand_analysis['detected']:
                 hand_detected_count += 1
+                gestures = hand_analysis.get('gestures', {})
+                hand_gestures['open_hands'] += gestures.get('open_hands', 0)
+                hand_gestures['pointing'] += gestures.get('pointing', 0)
+                hand_gestures['near_face'] += gestures.get('near_face', 0)
+                if gestures.get('active', False):
+                    hand_gestures['active'] = True
 
-        # Calculate final metrics
-        dominant_emotion = Counter(emotions_list).most_common(1)[0][0] if emotions_list else 'neutral'
+        # Calculate final metrics using intensity-weighted voting
+        if emotion_scores:
+            dominant_emotion = max(emotion_scores.items(), key=lambda x: x[1])[0]
+        else:
+            dominant_emotion = 'neutral'
+
         avg_emotion_confidence = sum(emotion_confidences) / len(emotion_confidences) if emotion_confidences else 0.0
         avg_posture_score = sum(posture_scores) / len(posture_scores) if posture_scores else 0.5
         hand_gestures_detected = hand_detected_count > 0
@@ -1002,14 +1201,39 @@ def analyze_video_mediapipe(video_bytes: bytes, session_id: str, chunk_index: in
         logger.info(
             f'[MediaPipe] Analysis: emotion={dominant_emotion} (conf={avg_emotion_confidence:.2f}), '
             f'posture={avg_posture_score:.2f}, hands={hand_gestures_detected}, '
-            f'face_detected={len(emotions_list) > 0}, pose_detected={len(posture_scores) > 0}'
+            f'face_detected={len(face_analyses) > 0}, pose_detected={len(posture_scores) > 0}'
         )
 
-        # Calculate engagement score
-        face_visibility_score = len(emotions_list) / max(frames_analyzed, 1)
-        positive_emotion_score = 1.0 if dominant_emotion in ['happy', 'engaged'] else 0.5
+        # Calculate engagement score with granular emotion weights
+        face_visibility_score = len(face_analyses) / max(frames_analyzed, 1)
+
+        # Granular emotion weights (not just binary 1.0/0.5)
+        emotion_weights = {
+            'happy': 1.0,
+            'excited': 0.95,
+            'surprised': 0.8,
+            'engaged': 0.9,
+            'neutral': 0.5,
+            'concentrated': 0.7,
+            'confused': 0.4,
+            'concerned': 0.45,
+            'sad': 0.3,
+            'frustrated': 0.25
+        }
+        positive_emotion_score = emotion_weights.get(dominant_emotion, 0.5)
+
         posture_contribution = avg_posture_score
-        hand_contribution = 1.0 if hand_gestures_detected else 0.5
+
+        # Rich hand gesture contribution
+        if hand_gestures_detected:
+            if hand_gestures['active']:
+                hand_contribution = 1.0  # Expressive gestures (open/pointing)
+            elif hand_gestures['near_face'] > 0:
+                hand_contribution = 0.7  # Thinking/contemplative pose
+            else:
+                hand_contribution = 0.8  # Hands visible but passive
+        else:
+            hand_contribution = 0.5  # No hands detected
 
         engagement_score = (
             face_visibility_score * 0.2 +
@@ -1021,13 +1245,13 @@ def analyze_video_mediapipe(video_bytes: bytes, session_id: str, chunk_index: in
         processing_time = int((time.time() - start_time) * 1000)
 
         result = {
-            'emotions': list(set(emotions_list)) if emotions_list else ['neutral'],
+            'emotions': list(emotion_scores.keys()) if emotion_scores else ['neutral'],
             'dominant_emotion': dominant_emotion,
             'emotion_confidence': round(avg_emotion_confidence, 2),
             'posture_score': round(avg_posture_score, 2),
             'engagement_score': round(engagement_score, 2),
             'hand_gestures_detected': hand_gestures_detected,
-            'facial_landmarks_detected': len(emotions_list) > 0,
+            'facial_landmarks_detected': len(face_analyses) > 0,
             'pose_landmarks_detected': len(posture_scores) > 0,
             'frames_analyzed': frames_analyzed,
             'processing_time_ms': processing_time
