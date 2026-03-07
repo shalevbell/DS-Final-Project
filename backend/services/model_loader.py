@@ -150,12 +150,12 @@ def preload_vocaltone_model() -> bool:
 
         logger.info('[ModelLoader] Preloading VocalTone model...')
 
-        # Use VOCAL_TONE_MODEL_DIR if set, else default backend/models/vocal_tone
+        # Use VOCAL_TONE_MODEL_DIR if set, else default backend/vocal_tone_model/models
         if Config.VOCAL_TONE_MODEL_DIR:
             models_dir = Path(Config.VOCAL_TONE_MODEL_DIR)
         else:
             backend_dir = Path(__file__).parent.parent  # services -> backend
-            models_dir = backend_dir / 'models' / 'vocal_tone'
+            models_dir = backend_dir / 'vocal_tone_model' / 'models'
 
         model_path = models_dir / 'vocal_tone_model.pkl'
         scaler_path = models_dir / 'vocal_tone_scaler.pkl'

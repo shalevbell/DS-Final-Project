@@ -431,7 +431,7 @@ def main():
     print("=" * 80)
     
     # Create models directory if it doesn't exist
-    models_dir = backend_dir / 'models' / 'vocal_tone'
+    models_dir = backend_dir / 'vocal_tone_model' / 'models'
     models_dir.mkdir(parents=True, exist_ok=True)
     
     model_path = models_dir / 'vocal_tone_model.pkl'
@@ -484,7 +484,7 @@ def create_zip_for_drive(models_dir: Path = None) -> bool:
     Use when the model is already trained and you only want to upload to Drive.
     """
     if models_dir is None:
-        models_dir = backend_dir / 'models' / 'vocal_tone'
+        models_dir = backend_dir / 'vocal_tone_model' / 'models'
     model_path = models_dir / 'vocal_tone_model.pkl'
     scaler_path = models_dir / 'vocal_tone_scaler.pkl'
     labels_path = models_dir / 'vocal_tone_labels.pkl'
