@@ -31,4 +31,4 @@ RUN sed -i 's/\r$//' /entrypoint.sh && chmod +x /entrypoint.sh
 EXPOSE 5000
 ENTRYPOINT ["/entrypoint.sh"]
 # Run with gunicorn using eventlet worker for SocketIO support
-CMD ["gunicorn", "--bind", "0.0.0.0:5000", "--worker-class", "eventlet", "--workers", "1", "--timeout", "120", "--worker-connections", "1000", "app:app"]
+CMD ["gunicorn", "--bind", "0.0.0.0:5000", "--worker-class", "eventlet", "--workers", "1", "--timeout", "300", "--worker-connections", "1000", "app:app"]

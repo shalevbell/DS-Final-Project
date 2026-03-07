@@ -46,7 +46,7 @@ class Config:
         "MEDIAPIPE_POSE_MODEL", "pose_landmarker_lite.task"
     )
     MEDIAPIPE_HAND_MODEL = os.getenv("MEDIAPIPE_HAND_MODEL", "hand_landmarker.task")
-    MEDIAPIPE_FRAME_SAMPLE_RATE = int(os.getenv("MEDIAPIPE_FRAME_SAMPLE_RATE", "1"))
+    MEDIAPIPE_FRAME_SAMPLE_RATE = int(os.getenv("MEDIAPIPE_FRAME_SAMPLE_RATE", "2"))
 
     # MediaPipe detection thresholdsj
     MEDIAPIPE_FACE_MIN_DETECTION_CONFIDENCE = float(
