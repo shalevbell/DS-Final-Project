@@ -314,9 +314,9 @@ class ChunkProcessor:
             raise ValueError(f'Missing chunk data in Redis for {session_id}:{chunk_index}')
 
         # 2b. Start heartbeat so the WebSocket doesn't time out during long processing
-        heartbeat_stop = threading.Event()
+        heartbeat_stop = eventlet.event.Event()
         def _heartbeat_loop():
-            while not heartbeat_stop.is_set():
+            while not heartbeat_stop.ready():
                 try:
                     if self.socketio:
                         self.socketio.emit(
@@ -326,11 +326,9 @@ class ChunkProcessor:
                         )
                 except Exception:
                     pass
-                if heartbeat_stop.wait(15):
-                    break
+                eventlet.sleep(15)
 
-        heartbeat_thread = threading.Thread(target=_heartbeat_loop, daemon=True)
-        heartbeat_thread.start()
+        heartbeat_greenlet = eventlet.spawn(_heartbeat_loop)
         try:
             # 3. Run parallel analysis
             # RUNS THE MODELS FOR THE CHUNK
@@ -360,7 +358,8 @@ class ChunkProcessor:
 
             logger.info(f'[Processing] Chunk {chunk_index} completed in {processing_time}ms')
         finally:
-            heartbeat_stop.set()
+            heartbeat_stop.send()
+            heartbeat_greenlet.kill()
 
     def _get_chunk_data(self, session_id: str, chunk_index: int):
         """
