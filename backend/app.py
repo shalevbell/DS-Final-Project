@@ -49,12 +49,15 @@ app.config.from_object(Config)
 CORS(app, origins=Config.CORS_ORIGINS)
 
 # Initialize SocketIO
-# Increase buffer size for large 30s video chunks
+# Increase buffer size for large 30s video chunks.
+# Long ping_timeout so the connection stays alive during slow model runs (e.g. 2–3 min per chunk).
 socketio = SocketIO(
     app,
     cors_allowed_origins=Config.CORS_ORIGINS,
     async_mode='eventlet',
-    max_http_buffer_size=100 * 1024 * 1024
+    max_http_buffer_size=100 * 1024 * 1024,
+    ping_interval=30,
+    ping_timeout=300,
 )
 
 # Preload ML models before starting chunk processor

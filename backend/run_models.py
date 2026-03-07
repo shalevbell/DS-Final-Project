@@ -1826,7 +1826,7 @@ def run_parallel_analysis(
     session_id: str,
     chunk_index: int,
     max_workers: int = None,
-    timeout: int = 60,
+    timeout: int = 300,
 ) -> Dict:
     """
     Run all analysis functions with dependency support.
@@ -1840,7 +1840,7 @@ def run_parallel_analysis(
         session_id: Session identifier
         chunk_index: Chunk index within session
         max_workers: Maximum parallel workers (default: None = auto-scale to independent model count)
-        timeout: Timeout in seconds per function (default: 60)
+        timeout: Timeout in seconds per function (default: 300 for slow CPU/Windows)
 
     Returns:
         Dictionary with all analysis results:
