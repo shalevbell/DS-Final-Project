@@ -11,6 +11,8 @@ services:
       REDIS_URL: redis://redis:6379/0
       EVENTLET_NO_GREENDNS: "yes"
       FLASK_ENV: development
+      # Ollama interviewer questions service (internal Docker hostname "ollama")
+      OLLAMA_BASE_URL: http://ollama:11434
       # Training mode: Set to "1" to enable dataset download (only needed for model training)
       # Leave at "0" for inference-only mode (saves startup time and bandwidth)
       ENABLE_TRAINING: "0"
@@ -29,11 +31,15 @@ services:
       - dataset_data:/data/dataset
       # Persist Whisper model cache between container restarts
       - whisper_cache:/root/.cache/huggingface
+      # Optional: mount Ollama models volume read-only into backend if needed in future
+      # - ollama_models:/root/.ollama:ro
     depends_on:
       postgres:
         condition: service_healthy
       redis:
         condition: service_healthy
+      ollama:
+        condition: service_started
     restart: unless-stopped
   postgres:
     image: postgres:15-alpine
@@ -67,8 +73,18 @@ services:
       retries: 5
     restart: unless-stopped
 
+  ollama:
+    image: ollama/ollama:latest
+    container_name: Helperviewer_ollama
+    ports:
+      - "11434:11434"   # expose for local testing if needed
+    volumes:
+      - ollama_models:/root/.ollama
+    restart: unless-stopped
+
 volumes:
   postgres_data:
   redis_data:
   whisper_cache:
   dataset_data:
+  ollama_models:

@@ -22,6 +22,7 @@ from faster_whisper import WhisperModel
 import librosa
 import soundfile as sf
 import joblib
+import requests
 
 from config import Config
 
@@ -1643,6 +1644,238 @@ def analyze_clifton_fusion(
         }
 
 
+def analyze_interviewer_questions_ollama(
+    data_bytes: bytes,
+    session_id: str,
+    chunk_index: int,
+    dependencies: Optional[Dict] = None,
+) -> Dict:
+    """
+    Generate 4 interviewer follow-up questions using an Ollama model.
+
+    This model consumes the outputs of:
+      - whisper
+      - mediapipe
+      - vocaltone
+      - clifton_fusion
+
+    and asks Ollama to propose 4 concise questions for the interviewer
+    in English, based on the candidate's behavior, strengths and
+    development areas.
+    """
+    start_time = time.time()
+
+    try:
+        if not dependencies:
+            raise ValueError("Missing dependencies dictionary")
+
+        required_deps = ["whisper", "mediapipe", "vocaltone", "clifton_fusion"]
+        missing = [name for name in required_deps if name not in dependencies]
+        if missing:
+            raise ValueError(f"Missing required dependencies: {missing}")
+
+        failed = [
+            name
+            for name, dep_result in dependencies.items()
+            if isinstance(dep_result, dict) and "error" in dep_result
+        ]
+        if failed:
+            raise ValueError(f"Dependency models failed: {failed}")
+
+        whisper_result = dependencies["whisper"]
+        mediapipe_result = dependencies["mediapipe"]
+        vocaltone_result = dependencies["vocaltone"]
+        clifton_result = dependencies["clifton_fusion"]
+
+        # Extract key signals with safe defaults
+        transcript = whisper_result.get("transcript", "") or "(no transcript available)"
+
+        dominant_emotion = mediapipe_result.get("dominant_emotion", "unknown")
+        emotion_confidence = mediapipe_result.get("emotion_confidence", 0.0)
+        posture_score = mediapipe_result.get("posture_score", 0.0)
+        engagement_score = mediapipe_result.get("engagement_score", 0.0)
+        hand_gestures_detected = mediapipe_result.get("hand_gestures_detected", False)
+
+        vt_emotion = vocaltone_result.get("emotion", "unknown")
+        vt_confidence = vocaltone_result.get("confidence", 0.0)
+        pitch_mean = vocaltone_result.get("pitch_mean", 0.0)
+        tempo = vocaltone_result.get("tempo", 0.0)
+        energy_level = vocaltone_result.get("energy_level", 0.0)
+
+        domain = clifton_result.get("predicted_domain", "unknown")
+        domain_confidence = clifton_result.get("confidence", 0.0)
+        domain_probs = clifton_result.get("domain_probabilities", {})
+        development_opportunities = clifton_result.get("development_opportunities", [])
+
+        # Build structured context text (English labels, English questions output)
+        context_text = (
+            f"Whisper transcript:\n{transcript}\n\n"
+            "MediaPipe video analysis:\n"
+            f"- Dominant emotion: {dominant_emotion} (confidence={emotion_confidence:.2f})\n"
+            f"- Posture score (0-1): {posture_score:.2f}\n"
+            f"- Engagement score (0-1): {engagement_score:.2f}\n"
+            f"- Hand gestures detected: {hand_gestures_detected}\n\n"
+            "VocalTone audio analysis:\n"
+            f"- Emotion: {vt_emotion} (confidence={vt_confidence:.2f})\n"
+            f"- Pitch mean (Hz): {pitch_mean:.1f}\n"
+            f"- Tempo (BPM): {tempo:.1f}\n"
+            f"- Energy level (0-1): {energy_level:.3f}\n\n"
+            "Clifton Fusion (strengths domain):\n"
+            f"- Predicted domain: {domain} (confidence={domain_confidence:.2f})\n"
+            f"- Domain probabilities: {domain_probs}\n"
+            f"- Development opportunities: {development_opportunities}\n"
+        )
+
+        system_prompt = (
+            "You are an expert technical interviewer assistant. "
+            "You receive multi-modal model analysis of a short video interview chunk "
+            "(speech transcript, facial expressions, posture, hand gestures, vocal tone "
+            "and Clifton strengths domain prediction). "
+            "Your goal is to help the human interviewer by suggesting focused, practical "
+            "follow-up questions.\n\n"
+            "IMPORTANT OUTPUT RULES:\n"
+            "- Output MUST be in English.\n"
+            "- Write exactly 4 numbered questions (1-4).\n"
+            "- Each question should be short, clear and conversational.\n"
+            "- Focus on: strengthening the candidate’s strengths, exploring development areas, "
+            "digging into behavioral examples, and understanding the candidate’s way of thinking.\n"
+            "- Do NOT summarize the candidate, only propose follow-up questions."
+        )
+
+        user_prompt = (
+            "Here is the information from the models about this interview chunk. "
+            "Based on it, propose exactly 4 follow-up questions for the interviewer (in English):\n\n"
+            f"{context_text}"
+        )
+
+        base_url = Config.OLLAMA_BASE_URL.rstrip("/")
+        model_name = Config.OLLAMA_MODEL_NAME
+
+        payload = {
+            "model": model_name,
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+            "stream": False,
+        }
+
+        logger.info(
+            f"[OllamaInterviewer] Sending request to Ollama model='{model_name}' "
+            f"for session={session_id}, chunk={chunk_index}"
+        )
+
+        try:
+            # Preferred: modern Ollama chat API
+            response = requests.post(
+                f"{base_url}/api/chat",
+                json=payload,
+                timeout=Config.OLLAMA_TIMEOUT,
+            )
+            if response.status_code == 404:
+                raise requests.HTTPError("chat endpoint not found (404)", response=response)
+            response.raise_for_status()
+            data = response.json()
+
+            # Ollama chat API returns {"message": {"role": "assistant", "content": "..."}}
+            raw_text = ""
+            if isinstance(data, Dict):
+                msg = data.get("message") or {}
+                raw_text = (msg.get("content") or "").strip()
+
+        except requests.HTTPError as http_err:
+            # Fallback for older Ollama versions: use /api/generate with a single prompt
+            if http_err.response is None or http_err.response.status_code != 404:
+                raise
+
+            logger.warning(
+                "[OllamaInterviewer] /api/chat not available, falling back to /api/generate"
+            )
+
+            generate_payload = {
+                "model": model_name,
+                "prompt": system_prompt + "\n\n" + user_prompt,
+                "stream": False,
+            }
+
+            response = requests.post(
+                f"{base_url}/api/generate",
+                json=generate_payload,
+                timeout=Config.OLLAMA_TIMEOUT,
+            )
+            response.raise_for_status()
+            data = response.json()
+
+            # /api/generate returns {"response": "..."} (non‑streaming)
+            raw_text = (data.get("response") or "").strip()
+
+        if not raw_text:
+            raise ValueError("Empty response from Ollama interviewer model")
+
+        # Simple parsing: take up to 4 non-empty lines as questions
+        questions = []
+        for line in raw_text.splitlines():
+            stripped = line.strip()
+            if not stripped:
+                continue
+            # Remove leading numbering / bullets
+            if stripped[0].isdigit() and "." in stripped:
+                stripped = stripped.split(".", 1)[1].strip()
+            elif stripped.startswith("- "):
+                stripped = stripped[2:].strip()
+            questions.append(stripped)
+            if len(questions) >= 4:
+                break
+
+        if len(questions) == 0:
+            # Fallback: use full text as a single item
+            questions = [raw_text]
+
+        processing_time = int((time.time() - start_time) * 1000)
+
+        result = {
+            "questions_text": raw_text,
+            "questions": questions,
+            "processing_time_ms": processing_time,
+        }
+
+        # Stream questions to frontend for interviewer
+        try:
+            from services.text_streaming import stream_text
+            from app import socketio
+
+            pretty_questions = "\n".join(
+                [f"{i + 1}. {q}" for i, q in enumerate(questions)]
+            )
+            stream_text(
+                socketio,
+                pretty_questions,
+                session_id,
+                {"source": "interviewer_ollama", "chunk": chunk_index},
+            )
+        except Exception as stream_err:
+            logger.warning(
+                f"[OllamaInterviewer] Failed to stream questions: {stream_err}"
+            )
+
+        logger.info(
+            f"[OllamaInterviewer] Generated {len(questions)} questions "
+            f"for session={session_id}, chunk={chunk_index} in {processing_time}ms"
+        )
+
+        return result
+
+    except Exception as e:
+        logger.error(
+            f"[OllamaInterviewer] Error for session={session_id}, chunk={chunk_index}: {e}",
+            exc_info=True,
+        )
+        return {
+            "error": str(e),
+            "processing_time_ms": int((time.time() - start_time) * 1000),
+        }
+
+
 # =============================================================================
 # SUMMARY LOGGING
 # =============================================================================
@@ -1766,6 +1999,25 @@ def log_chunk_summary(session_id: str, chunk_index: int, results: Dict):
 
             logger.info(f"   Processing time: {processing_time}ms")
 
+    # Interviewer questions (Ollama) results
+    if "interviewer_ollama" in results:
+        ollama_result = results["interviewer_ollama"]
+        if "error" in ollama_result:
+            logger.info("[OllamaInterviewer] Questions generation: FAILED")
+            logger.info(f"   Error: {ollama_result['error']}")
+        else:
+            questions = ollama_result.get("questions", [])
+            processing_time = ollama_result.get("processing_time_ms", 0)
+
+            logger.info("[OllamaInterviewer] Questions generation: SUCCESS")
+            if questions:
+                logger.info("   Questions:")
+                for i, q in enumerate(questions, start=1):
+                    logger.info(f"      {i}. {q}")
+            else:
+                logger.info("   (No questions returned)")
+            logger.info(f"   Processing time: {processing_time}ms")
+
     # Overall summary
     total_time = results.get("total_processing_time_ms", 0)
     # Count successful models (exclude total_processing_time_ms which is an int)
@@ -1816,6 +2068,16 @@ MODEL_REGISTRY = {
         "function": analyze_clifton_fusion,
         "data_type": "audio",  # Doesn't actually use audio_bytes, but needs a value
         "depends_on": ["whisper", "vocaltone"],  # Runs after whisper and vocaltone
+    },
+    "interviewer_ollama": {
+        "function": analyze_interviewer_questions_ollama,
+        "data_type": "audio",  # Doesn't actually use audio_bytes directly
+        "depends_on": [
+            "whisper",
+            "mediapipe",
+            "vocaltone",
+            "clifton_fusion",
+        ],  # Runs after all four base models
     },
 }
 
