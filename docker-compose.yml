@@ -3,7 +3,7 @@ services:
     build:
       context: ./backend
       dockerfile: Dockerfile
-    container_name: Helperviewer_backend
+    container_name: backend
     ports:
       - "5555:5000"
     environment:
@@ -40,10 +40,18 @@ services:
         condition: service_healthy
       ollama:
         condition: service_started
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
     restart: unless-stopped
+    networks:
+      - helperviewer_network
   postgres:
     image: postgres:15-alpine
-    container_name: Helperviewer_postgres
+    container_name: postgres
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
@@ -58,10 +66,13 @@ services:
       timeout: 5s
       retries: 5
     restart: unless-stopped
+    networks:
+      - helperviewer_network
 
   redis:
     image: redis:7-alpine
-    container_name: Helperviewer_redis
+    container_name: redis
+    command: redis-server --appendonly yes --maxmemory 512mb --maxmemory-policy allkeys-lru
     ports:
       - "6379:6379"
     volumes:
@@ -72,19 +83,33 @@ services:
       timeout: 5s
       retries: 5
     restart: unless-stopped
+    networks:
+      - helperviewer_network
 
   ollama:
     image: ollama/ollama:latest
-    container_name: Helperviewer_ollama
+    container_name: ollama
     ports:
-      - "11434:11434"   # expose for local testing if needed
+      - "11434:11434"
     volumes:
       - ollama_models:/root/.ollama
     restart: unless-stopped
+    networks:
+      - helperviewer_network
+
+networks:
+  helperviewer_network:
+    driver: bridge
+    name: helperviewer_network
 
 volumes:
   postgres_data:
+    name: helperviewer_postgres_data
   redis_data:
+    name: helperviewer_redis_data
   whisper_cache:
+    name: helperviewer_whisper_cache
   dataset_data:
+    name: helperviewer_dataset_data
   ollama_models:
+    name: helperviewer_ollama_models
