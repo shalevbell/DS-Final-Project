@@ -161,7 +161,15 @@ class VideoApp {
             // Keep connection alive during long backend processing
         });
         this.socket.on('chunk_results', (data) => {
-            this.handleChunkResults(data);
+            // Only log raw model outputs; UI shows interviewer questions only
+            const { chunkIndex, results } = data || {};
+            if (chunkIndex !== undefined && results) {
+                console.log(
+                    `[ChunkResults] Chunk ${chunkIndex} models: ${Object.keys(results).join(', ')}`
+                );
+            } else {
+                console.log('[ChunkResults] Received chunk results', data);
+            }
         });
         // Generic text streaming handler
         this.socket.on('text_stream', (data) => {
@@ -437,6 +445,14 @@ class VideoApp {
      */
     handleTextStream(data) {
         const { text, timestamp, metadata } = data;
+
+        // Show only interviewer_ollama questions in the right-hand panel.
+        // Other sources (whisper, mediapipe, vocaltone, clifton_fusion, etc.)
+        // are kept in logs only.
+        if (metadata && metadata.source && metadata.source !== 'interviewer_ollama') {
+            console.log('[TextStream] Skipping non-interviewer source:', metadata.source);
+            return;
+        }
 
         // Initialize TextStreamer if needed
         if (!this.textStreamer) {

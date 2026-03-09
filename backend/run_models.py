@@ -14,6 +14,7 @@ from collections import Counter
 from pathlib import Path
 from typing import Dict, List, Optional
 from concurrent.futures import ThreadPoolExecutor
+import re
 
 import cv2
 import mediapipe as mp
@@ -1727,24 +1728,23 @@ def analyze_interviewer_questions_ollama(
         )
 
         system_prompt = (
-            "You are an expert technical interviewer assistant. "
-            "You receive multi-modal model analysis of a short video interview chunk "
-            "(speech transcript, facial expressions, posture, hand gestures, vocal tone "
-            "and Clifton strengths domain prediction). "
-            "Your goal is to help the human interviewer by suggesting focused, practical "
-            "follow-up questions.\n\n"
-            "IMPORTANT OUTPUT RULES:\n"
+            "You are an expert interviewer assistant. You receive analysis of a short video interview "
+            "chunk (transcript, facial expressions, posture, vocal tone and strengths).\n\n"
+            "YOUR ONLY TASK:\n"
+            "- Propose focused follow-up questions for the human interviewer.\n\n"
+            "STRICT OUTPUT RULES:\n"
             "- Output MUST be in English.\n"
-            "- Write exactly 4 numbered questions (1-4).\n"
-            "- Each question should be short, clear and conversational.\n"
-            "- Focus on: strengthening the candidate’s strengths, exploring development areas, "
-            "digging into behavioral examples, and understanding the candidate’s way of thinking.\n"
-            "- Do NOT summarize the candidate, only propose follow-up questions."
+            "- Output MUST be ONLY 3 numbered questions, each on its own line.\n"
+            "- Format: '1. ...', then '2. ...', then '3. ...'.\n"
+            "- Do NOT write introductions, explanations, summaries or closing sentences.\n"
+            "- Do NOT say things like 'I am ready', 'please provide', or 'I will do X'.\n"
+            "- Each line must be a clear question ending with a question mark '?'.\n"
+            "- Focus on strengths, development areas, behavioral examples and thinking process."
         )
 
         user_prompt = (
-            "Here is the information from the models about this interview chunk. "
-            "Based on it, propose exactly 4 follow-up questions for the interviewer (in English):\n\n"
+            "Based on the following model analysis for this interview chunk, reply with ONLY 3 numbered "
+            "follow-up questions (1. ... 2. ... 3. ...). Nothing else:\n\n"
             f"{context_text}"
         )
 
@@ -1784,12 +1784,12 @@ def analyze_interviewer_questions_ollama(
                 raw_text = (msg.get("content") or "").strip()
 
         except requests.HTTPError as http_err:
-            # Fallback for older Ollama versions: use /api/generate with a single prompt
-            if http_err.response is None or http_err.response.status_code != 404:
-                raise
-
+            # Fallback: if /api/chat fails for any reason (404, 500, etc.),
+            # try the simpler /api/generate endpoint with a single prompt.
+            status = http_err.response.status_code if http_err.response is not None else None
             logger.warning(
-                "[OllamaInterviewer] /api/chat not available, falling back to /api/generate"
+                f"[OllamaInterviewer] /api/chat failed with status={status}, "
+                "falling back to /api/generate"
             )
 
             generate_payload = {
@@ -1812,8 +1812,8 @@ def analyze_interviewer_questions_ollama(
         if not raw_text:
             raise ValueError("Empty response from Ollama interviewer model")
 
-        # Simple parsing: take up to 4 non-empty lines as questions
-        questions = []
+        # Simple parsing: extract up to 4 question-like lines
+        questions: List[str] = []
         for line in raw_text.splitlines():
             stripped = line.strip()
             if not stripped:
@@ -1824,12 +1824,22 @@ def analyze_interviewer_questions_ollama(
             elif stripped.startswith("- "):
                 stripped = stripped[2:].strip()
             questions.append(stripped)
-            if len(questions) >= 4:
+            if len(questions) >= 8:
+                # collect a few more than needed, we will filter below
                 break
 
+        # Keep only lines that look like real questions (contain a '?')
+        questions = [q for q in questions if "?" in q]
+
         if len(questions) == 0:
-            # Fallback: use full text as a single item
-            questions = [raw_text]
+            # Fallback: extract sentences ending with '?' from full text
+            sentence_candidates = re.findall(r"[^?]*\\?", raw_text)
+            cleaned = [s.strip() for s in sentence_candidates if s.strip().endswith("?")]
+            questions = cleaned or [raw_text.strip()]
+
+        # Enforce at most 3
+        if len(questions) > 3:
+            questions = questions[:3]
 
         processing_time = int((time.time() - start_time) * 1000)
 

@@ -98,8 +98,8 @@ class Config:
     # Ollama interviewer questions model
     # Base URL of the Ollama server
     OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://ollama:11434")
-    # Name of the Ollama model to use (e.g. llama3, mistral, etc.)
-    # Default to "llama3" which is a standard, well-supported base model.
+    # Name of the Ollama model to use (e.g. llama3, mistral, phi3:mini, gemma3:270m, etc.)
+    # Default to the very small \"gemma3:270m\" model to fit low-RAM environments.
     OLLAMA_MODEL_NAME = os.getenv("OLLAMA_MODEL_NAME", "llama3")
     # Timeout in seconds for Ollama HTTP requests
     OLLAMA_TIMEOUT = int(os.getenv("OLLAMA_TIMEOUT", "60"))
