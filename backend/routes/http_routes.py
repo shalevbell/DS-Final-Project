@@ -8,6 +8,7 @@ import logging
 from flask import Flask, jsonify, send_from_directory
 from chunk_processor import ChunkProcessor
 from services.connection_manager import check_postgres_health, check_redis_health
+from services.model_loader import get_preload_status
 from run_models import list_savee_dataset_files
 
 logger = logging.getLogger(__name__)
@@ -66,6 +67,29 @@ def register_http_routes(app: Flask, chunk_processor: ChunkProcessor, frontend_d
                 'avg_processing_time_ms': stats['avg_processing_time_ms']
             }), 200
         return jsonify({'error': 'Processor not initialized'}), 503
+
+    @app.route('/api/models/status', methods=['GET'])
+    def models_status():
+        """
+        Return model preloading status.
+
+        Returns:
+            JSON with status of each model:
+            {
+                "whisper": {"ready": bool, "loading": bool, "error": str|null},
+                "mediapipe": {"ready": bool, "loading": bool, "error": str|null},
+                "vocaltone": {"ready": bool, "loading": bool, "error": str|null},
+                "ollama": {"ready": bool, "loading": bool, "error": str|null},
+                "all_ready": bool
+            }
+        """
+        status = get_preload_status()
+        all_ready = all(model['ready'] for model in status.values())
+
+        return jsonify({
+            **status,
+            'all_ready': all_ready
+        }), 200
 
     @app.route('/api/vocal-tone/dataset/list', methods=['GET'])
     def list_vocal_tone_dataset():

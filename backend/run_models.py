@@ -1708,43 +1708,58 @@ def analyze_interviewer_questions_ollama(
         domain_probs = clifton_result.get("domain_probabilities", {})
         development_opportunities = clifton_result.get("development_opportunities", [])
 
-        # Build structured context text (English labels, English questions output)
+        # Build context focusing on candidate's behavior, not technical details
+        # Interpret behavioral signals in plain language
+        emotion_desc = f"{dominant_emotion}" if dominant_emotion != "unknown" else "neutral"
+        posture_desc = "good" if posture_score > 0.6 else "slouched" if posture_score < 0.4 else "moderate"
+        engagement_desc = "highly engaged" if engagement_score > 0.6 else "disengaged" if engagement_score < 0.4 else "moderately engaged"
+        vocal_desc = f"{vt_emotion}" if vt_emotion != "unknown" else "neutral"
+        energy_desc = "high energy" if energy_level > 0.5 else "low energy"
+
         context_text = (
-            f"Whisper transcript:\n{transcript}\n\n"
-            "MediaPipe video analysis:\n"
-            f"- Dominant emotion: {dominant_emotion} (confidence={emotion_confidence:.2f})\n"
-            f"- Posture score (0-1): {posture_score:.2f}\n"
-            f"- Engagement score (0-1): {engagement_score:.2f}\n"
-            f"- Hand gestures detected: {hand_gestures_detected}\n\n"
-            "VocalTone audio analysis:\n"
-            f"- Emotion: {vt_emotion} (confidence={vt_confidence:.2f})\n"
-            f"- Pitch mean (Hz): {pitch_mean:.1f}\n"
-            f"- Tempo (BPM): {tempo:.1f}\n"
-            f"- Energy level (0-1): {energy_level:.3f}\n\n"
-            "Clifton Fusion (strengths domain):\n"
-            f"- Predicted domain: {domain} (confidence={domain_confidence:.2f})\n"
-            f"- Domain probabilities: {domain_probs}\n"
-            f"- Development opportunities: {development_opportunities}\n"
+            f"CANDIDATE'S RESPONSE (verbatim transcript):\n{transcript}\n\n"
+            f"OBSERVED BEHAVIOR:\n"
+            f"- Facial expression: {emotion_desc}\n"
+            f"- Body language: {posture_desc} posture, {engagement_desc}\n"
+            f"- Vocal tone: {vocal_desc}, {energy_desc}\n"
+            f"- Hand gestures: {'yes' if hand_gestures_detected else 'minimal'}\n\n"
+            f"STRENGTHS PROFILE:\n"
+            f"- Primary strength domain: {domain}\n"
+            f"- Areas for development: {', '.join(development_opportunities) if development_opportunities else 'none identified'}\n"
         )
 
         system_prompt = (
-            "You are an expert interviewer assistant. You receive analysis of a short video interview "
-            "chunk (transcript, facial expressions, posture, vocal tone and strengths).\n\n"
-            "YOUR ONLY TASK:\n"
-            "- Propose focused follow-up questions for the human interviewer.\n\n"
-            "STRICT OUTPUT RULES:\n"
-            "- Output MUST be in English.\n"
-            "- Output MUST be ONLY 3 numbered questions, each on its own line.\n"
-            "- Format: '1. ...', then '2. ...', then '3. ...'.\n"
-            "- Do NOT write introductions, explanations, summaries or closing sentences.\n"
-            "- Do NOT say things like 'I am ready', 'please provide', or 'I will do X'.\n"
-            "- Each line must be a clear question ending with a question mark '?'.\n"
-            "- Focus on strengths, development areas, behavioral examples and thinking process."
+            "You are assisting a job interviewer. A candidate just answered a question on video.\n\n"
+            "YOUR TASK:\n"
+            "Generate 3 follow-up questions that the interviewer can ask TO THE CANDIDATE.\n\n"
+            "CRITICAL RULES:\n"
+            "1. The person in the video is the CANDIDATE (job applicant)\n"
+            "2. Questions should directly address the CANDIDATE using 'you'\n"
+            "3. Reference specific things the CANDIDATE said in their answer\n"
+            "4. Consider their vocal tone and body language when crafting questions\n"
+            "5. Probe deeper on topics they mentioned (ask for examples, clarifications, thinking process)\n"
+            "6. If tone/body language conflicts with words (e.g., nervous but claims confidence), probe that\n\n"
+            "OUTPUT FORMAT (STRICT):\n"
+            "- Output ONLY the 3 questions, nothing else\n"
+            "- Format: '1. ...?' then '2. ...?' then '3. ...?'\n"
+            "- Each question MUST end with '?'\n"
+            "- Each question MUST address the candidate directly\n"
+            "- NO introductions, explanations, or acknowledgments\n"
+            "- If you write ANYTHING besides the 3 questions, you FAIL\n\n"
+            "GOOD EXAMPLES (candidate discussed encryption/lava lamps):\n"
+            "1. You mentioned CloudFlare uses lava lamps for random number generation - can you explain how you would implement a similar system for a different use case?\n"
+            "2. What challenges do you think arise when trying to achieve true randomness in computer systems?\n"
+            "3. Can you give an example from your experience where you had to balance security requirements with practical constraints?\n\n"
+            "BAD EXAMPLES:\n"
+            "1. How did you manage the emotional response during the interview?\n"
+            "2. What are the strengths of your approach?\n"
+            "3. How would you handle a situation?\n"
+            "(BAD because: #1 treats candidate as interviewer, #2 & #3 are too generic and don't reference what they said)"
         )
 
         user_prompt = (
-            "Based on the following model analysis for this interview chunk, reply with ONLY 3 numbered "
-            "follow-up questions (1. ... 2. ... 3. ...). Nothing else:\n\n"
+            "The candidate just gave this response. Generate 3 follow-up questions for the interviewer to ask the candidate. "
+            "Reference specific things they said. Output ONLY the 3 questions:\n\n"
             f"{context_text}"
         )
 

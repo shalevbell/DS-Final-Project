@@ -29,6 +29,15 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# Filter to suppress harmless socket shutdown errors from eventlet
+class SocketShutdownFilter(logging.Filter):
+    def filter(self, record):
+        # Suppress "Bad file descriptor" socket shutdown errors
+        return 'socket shutdown error' not in record.getMessage()
+
+# Apply filter to root logger (catches eventlet messages)
+logging.getLogger().addFilter(SocketShutdownFilter())
+
 # Get the frontend directory path
 project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 frontend_dir = os.path.join(project_root, 'frontend')
@@ -60,13 +69,14 @@ socketio = SocketIO(
     ping_timeout=300,
 )
 
-# Preload ML models before starting chunk processor
-from services.model_loader import preload_all_models
-model_status = preload_all_models()
-
 # Initialize services
 redis_client = get_redis_client()
 chunk_processor = initialize_chunk_processor(socketio_instance=socketio)
+
+# Preload ML models in background thread (non-blocking)
+# This allows Flask to start immediately while models load asynchronously
+from services.model_loader import preload_all_models
+eventlet.spawn(preload_all_models)
 
 # Register routes and handlers
 register_http_routes(app, chunk_processor, frontend_dir)

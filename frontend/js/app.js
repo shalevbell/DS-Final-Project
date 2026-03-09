@@ -93,6 +93,7 @@ class VideoApp {
         this.cameraSelect = document.getElementById('camera-select');
         this.clearOutputBtn = document.getElementById('clear-output-btn');
         this.outputContent = document.getElementById('output-content');
+        this.modelsStatus = document.getElementById('models-status');
         this.localStream = null;
         this.mediaRecorder = null;
         this.socket = null;
@@ -103,14 +104,21 @@ class VideoApp {
         this.isCameraActive = false;
         this.chunkDurationMs = 30000;  // Default, will be overridden by backend
         this.textStreamer = null;
+        this.modelsReady = false;
+        this.modelsCheckInterval = null;
 
         // Session-specific state (initialized when camera starts)
         this.sessionId = null;
         this.chunkIndex = null;
 
+        // Disable camera button until models are ready
+        this.toggleButton.disabled = true;
+        this.toggleButton.textContent = 'Loading Models...';
+
         this.initializeWebSocket();
         this.initializeEventListeners();
         this.enumerateCameras();
+        this.startModelStatusCheck();
     }
 
     initializeSession() {
@@ -523,6 +531,124 @@ class VideoApp {
             timestamp,
             metadata: { chunk: chunkIndex, source: 'chunk_results' }
         });
+    }
+
+    /**
+     * Start checking model preload status from backend
+     */
+    startModelStatusCheck() {
+        this.checkModelStatus(); // Check immediately
+
+        // Poll every 3 seconds until all models are ready
+        this.modelsCheckInterval = setInterval(() => {
+            if (!this.modelsReady) {
+                this.checkModelStatus();
+            } else {
+                // Stop polling once all models are ready
+                clearInterval(this.modelsCheckInterval);
+                this.modelsCheckInterval = null;
+            }
+        }, 3000);
+    }
+
+    /**
+     * Check model status from backend API
+     */
+    async checkModelStatus() {
+        try {
+            const { protocol, hostname } = window.location;
+            const backendPort = '5555';
+            const response = await fetch(`${protocol}//${hostname}:${backendPort}/api/models/status`);
+
+            if (!response.ok) {
+                throw new Error(`HTTP error! status: ${response.status}`);
+            }
+
+            const data = await response.json();
+            this.updateModelStatusUI(data);
+        } catch (error) {
+            console.error('Failed to check model status:', error);
+            this.updateModelStatusUI({ all_ready: false, error: true });
+        }
+    }
+
+    /**
+     * Update model status UI based on backend response
+     * @param {Object} status - Status object from backend
+     */
+    updateModelStatusUI(status) {
+        if (!this.modelsStatus) return;
+
+        const statusText = this.modelsStatus.querySelector('.status-text');
+
+        // Check if any models are actively loading
+        let anyLoading = false;
+        let hasError = false;
+
+        for (const [modelName, modelStatus] of Object.entries(status)) {
+            if (modelName === 'all_ready') continue;
+            if (modelStatus.loading) anyLoading = true;
+            if (modelStatus.error) hasError = true;
+        }
+
+        if (status.error) {
+            this.modelsStatus.className = 'models-status error';
+            statusText.textContent = 'Model status unavailable';
+            // Allow camera to work even if status check failed
+            if (!anyLoading) {
+                this.toggleButton.disabled = false;
+                this.toggleButton.textContent = 'Start Camera (Models may load at runtime)';
+            }
+            return;
+        }
+
+        if (status.all_ready) {
+            this.modelsReady = true;
+            this.modelsStatus.className = 'models-status ready';
+            statusText.textContent = 'All models ready';
+
+            // Enable camera button when all models are ready
+            this.toggleButton.disabled = false;
+            this.toggleButton.textContent = 'Start Camera';
+        } else {
+            // Check which models are loading
+            const loadingModels = [];
+            const readyModels = [];
+
+            for (const [modelName, modelStatus] of Object.entries(status)) {
+                if (modelName === 'all_ready') continue;
+
+                if (modelStatus.loading) {
+                    loadingModels.push(modelName);
+                } else if (modelStatus.ready) {
+                    readyModels.push(modelName);
+                }
+            }
+
+            this.modelsStatus.className = 'models-status';
+
+            // Only disable camera button while models are actively loading
+            // If loading failed, enable button (models can load at runtime)
+            this.toggleButton.disabled = anyLoading;
+
+            // Special handling for Ollama progress
+            if (status.ollama && status.ollama.loading && status.ollama.progress !== undefined) {
+                const progress = status.ollama.progress;
+                const statusTextStr = status.ollama.status_text || 'downloading';
+                statusText.textContent = `Downloading Ollama model: ${progress}% (${statusTextStr})`;
+                this.toggleButton.textContent = `Loading Models... ${progress}%`;
+            } else if (loadingModels.length > 0) {
+                statusText.textContent = `Loading models... (${readyModels.length}/${readyModels.length + loadingModels.length} ready)`;
+                this.toggleButton.textContent = `Loading Models... (${readyModels.length}/${readyModels.length + loadingModels.length})`;
+            } else if (hasError) {
+                // Models finished loading but some failed - allow camera anyway
+                statusText.textContent = 'Some models failed to load';
+                this.toggleButton.textContent = 'Start Camera (Some models unavailable)';
+            } else {
+                statusText.textContent = 'Initializing models...';
+                this.toggleButton.textContent = 'Start Camera';
+            }
+        }
     }
 
 }
