@@ -127,11 +127,16 @@ class VideoApp {
         if (typeof io === 'undefined') return;
         const { protocol, hostname } = window.location;
         const backendPort = '5555';  // Backend runs on port 5555
+        // Long timeouts so connection survives slow model runs (2–3 min per chunk)
         this.socket = io(`${protocol}//${hostname}:${backendPort}`, {
             transports: ['websocket'],
             reconnection: true,
             reconnectionDelay: 1000,
-            reconnectionAttempts: 5
+            reconnectionDelayMax: 15000,
+            reconnectionAttempts: 20,
+            timeout: 120000,
+            pingTimeout: 300000,
+            pingInterval: 20000
         });
         this.socket.on('connect', () => {
             this.socketConnected = true;
@@ -151,6 +156,9 @@ class VideoApp {
                 this.chunkDurationMs = data.chunkDurationMs;
                 console.log(`Chunk duration set to ${this.chunkDurationMs}ms`);
             }
+        });
+        this.socket.on('processing_heartbeat', () => {
+            // Keep connection alive during long backend processing
         });
         this.socket.on('chunk_results', (data) => {
             this.handleChunkResults(data);

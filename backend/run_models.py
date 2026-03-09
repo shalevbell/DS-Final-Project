@@ -76,9 +76,7 @@ def _get_dataset_path() -> str:
 
 
 def _preprocess_audio_file(
-    audio_path: str,
-    target_sr: int = 16000,
-    target_duration_sec: float = 3.0
+    audio_path: str, target_sr: int = 16000, target_duration_sec: float = 3.0
 ) -> tuple:
     """
     Standard audio preprocessing pipeline.
@@ -119,7 +117,7 @@ def _preprocess_audio_file(
         audio = audio[:target_samples]
     elif current_samples < target_samples:
         # Pad: zero-padding at the end
-        audio = np.pad(audio, (0, target_samples - current_samples), mode='constant')
+        audio = np.pad(audio, (0, target_samples - current_samples), mode="constant")
 
     return audio, sr
 
@@ -140,7 +138,7 @@ def list_savee_dataset_files(dataset_path: str = None) -> Dict:
     List all files in the SAVEE dataset directory for Vocal Tone model training.
 
     Args:
-        dataset_path: Path to the SAVEE dataset directory. 
+        dataset_path: Path to the SAVEE dataset directory.
                      If None, uses the default path (detected automatically).
 
     Returns:
@@ -156,100 +154,104 @@ def list_savee_dataset_files(dataset_path: str = None) -> Dict:
     """
     if dataset_path is None:
         dataset_path = _get_dataset_path()
-    
+
     dataset_path_obj = Path(dataset_path)
-    
+
     result = {
-        'path': str(dataset_path_obj),
-        'exists': False,
-        'total_files': 0,
-        'files': [],
-        'directories': [],
-        'file_extensions': {},
-        'error': None
+        "path": str(dataset_path_obj),
+        "exists": False,
+        "total_files": 0,
+        "files": [],
+        "directories": [],
+        "file_extensions": {},
+        "error": None,
     }
-    
+
     try:
         if not dataset_path_obj.exists():
-            error_msg = f'Dataset path does not exist: {dataset_path}'
-            logger.error(f'[VocalTone] {error_msg}')
-            result['error'] = error_msg
+            error_msg = f"Dataset path does not exist: {dataset_path}"
+            logger.error(f"[VocalTone] {error_msg}")
+            result["error"] = error_msg
             return result
-        
+
         if not dataset_path_obj.is_dir():
-            error_msg = f'Path is not a directory: {dataset_path}'
-            logger.error(f'[VocalTone] {error_msg}')
-            result['error'] = error_msg
+            error_msg = f"Path is not a directory: {dataset_path}"
+            logger.error(f"[VocalTone] {error_msg}")
+            result["error"] = error_msg
             return result
-        
-        result['exists'] = True
-        
+
+        result["exists"] = True
+
         # List all files and directories
         files_list = []
         directories_list = []
         extensions_count = {}
-        
+
         for item in dataset_path_obj.iterdir():
             if item.is_file():
                 file_info = {
-                    'name': item.name,
-                    'path': str(item),
-                    'size_bytes': item.stat().st_size,
-                    'size_mb': round(item.stat().st_size / (1024 * 1024), 2),
-                    'extension': item.suffix.lower()
+                    "name": item.name,
+                    "path": str(item),
+                    "size_bytes": item.stat().st_size,
+                    "size_mb": round(item.stat().st_size / (1024 * 1024), 2),
+                    "extension": item.suffix.lower(),
                 }
                 files_list.append(file_info)
-                
+
                 # Count extensions
-                ext = item.suffix.lower() or 'no_extension'
+                ext = item.suffix.lower() or "no_extension"
                 extensions_count[ext] = extensions_count.get(ext, 0) + 1
-            
+
             elif item.is_dir():
                 directories_list.append(item.name)
-        
+
         # Sort files by name
-        files_list.sort(key=lambda x: x['name'])
+        files_list.sort(key=lambda x: x["name"])
         directories_list.sort()
-        
-        result['total_files'] = len(files_list)
-        result['files'] = files_list
-        result['directories'] = directories_list
-        result['file_extensions'] = extensions_count
-        
+
+        result["total_files"] = len(files_list)
+        result["files"] = files_list
+        result["directories"] = directories_list
+        result["file_extensions"] = extensions_count
+
         # Print to console/logs
-        logger.info(f'[VocalTone] Dataset path: {dataset_path}')
-        logger.info(f'[VocalTone] Total files found: {result["total_files"]}')
-        logger.info(f'[VocalTone] Directories: {len(directories_list)}')
-        logger.info(f'[VocalTone] File extensions: {extensions_count}')
-        
+        logger.info(f"[VocalTone] Dataset path: {dataset_path}")
+        logger.info(f"[VocalTone] Total files found: {result['total_files']}")
+        logger.info(f"[VocalTone] Directories: {len(directories_list)}")
+        logger.info(f"[VocalTone] File extensions: {extensions_count}")
+
         if files_list:
-            logger.info('[VocalTone] Sample files (first 10):')
+            logger.info("[VocalTone] Sample files (first 10):")
             for file_info in files_list[:10]:
-                logger.info(f'  - {file_info["name"]} ({file_info["size_mb"]} MB, {file_info["extension"]})')
+                logger.info(
+                    f"  - {file_info['name']} ({file_info['size_mb']} MB, {file_info['extension']})"
+                )
             if len(files_list) > 10:
-                logger.info(f'  ... and {len(files_list) - 10} more files')
-        
+                logger.info(f"  ... and {len(files_list) - 10} more files")
+
         if directories_list:
-            logger.info(f'[VocalTone] Subdirectories: {", ".join(directories_list)}')
-        
+            logger.info(f"[VocalTone] Subdirectories: {', '.join(directories_list)}")
+
         return result
-        
+
     except PermissionError as e:
-        error_msg = f'Permission denied accessing path: {dataset_path}'
-        logger.error(f'[VocalTone] {error_msg}: {e}')
-        result['error'] = error_msg
+        error_msg = f"Permission denied accessing path: {dataset_path}"
+        logger.error(f"[VocalTone] {error_msg}: {e}")
+        result["error"] = error_msg
         return result
     except Exception as e:
-        error_msg = f'Error listing dataset files: {str(e)}'
-        logger.error(f'[VocalTone] {error_msg}\n{traceback.format_exc()}')
-        result['error'] = error_msg
+        error_msg = f"Error listing dataset files: {str(e)}"
+        logger.error(f"[VocalTone] {error_msg}\n{traceback.format_exc()}")
+        result["error"] = error_msg
         return result
 
 
-def augment_audio(audio: np.ndarray, sr: int, augmentation_type: str = 'none') -> np.ndarray:
+def augment_audio(
+    audio: np.ndarray, sr: int, augmentation_type: str = "none"
+) -> np.ndarray:
     """
     Apply data augmentation to audio signal.
-    
+
     Args:
         audio: Audio waveform array
         sr: Sample rate
@@ -259,14 +261,14 @@ def augment_audio(audio: np.ndarray, sr: int, augmentation_type: str = 'none') -
             - 'pitch_shift': Pitch shifting (±2 semitones)
             - 'noise': Add Gaussian noise (SNR ~20dB)
             - 'time_shift': Time shifting (circular shift)
-    
+
     Returns:
         Augmented audio array (same length as input)
     """
-    if augmentation_type == 'none':
+    if augmentation_type == "none":
         return audio
-    
-    elif augmentation_type == 'time_stretch':
+
+    elif augmentation_type == "time_stretch":
         # Time stretching: speed up or slow down by ±10%
         rate = np.random.uniform(0.9, 1.1)
         stretched = librosa.effects.time_stretch(audio, rate=rate)
@@ -275,15 +277,17 @@ def augment_audio(audio: np.ndarray, sr: int, augmentation_type: str = 'none') -
         if len(stretched) > target_len:
             stretched = stretched[:target_len]
         elif len(stretched) < target_len:
-            stretched = np.pad(stretched, (0, target_len - len(stretched)), mode='constant')
+            stretched = np.pad(
+                stretched, (0, target_len - len(stretched)), mode="constant"
+            )
         return stretched
-    
-    elif augmentation_type == 'pitch_shift':
+
+    elif augmentation_type == "pitch_shift":
         # Pitch shifting: shift by ±2 semitones
         n_steps = np.random.uniform(-2, 2)
         return librosa.effects.pitch_shift(audio, sr=sr, n_steps=n_steps)
-    
-    elif augmentation_type == 'noise':
+
+    elif augmentation_type == "noise":
         # Add Gaussian noise (SNR ~20dB)
         noise_level = np.random.uniform(0.01, 0.05)  # 1-5% of signal amplitude
         noise = np.random.normal(0, noise_level, len(audio))
@@ -293,78 +297,66 @@ def augment_audio(audio: np.ndarray, sr: int, augmentation_type: str = 'none') -
         if max_val > 0:
             augmented = augmented / max_val * 0.95
         return augmented
-    
-    elif augmentation_type == 'time_shift':
+
+    elif augmentation_type == "time_shift":
         # Circular time shift (wrap around)
         shift_amount = np.random.randint(0, len(audio))
         return np.roll(audio, shift_amount)
-    
+
     else:
         return audio
 
 
 def extract_extended_features(
-    audio: np.ndarray,
-    sr: int,
-    n_mfcc: int = 40
+    audio: np.ndarray, sr: int, n_mfcc: int = 40
 ) -> np.ndarray:
     """
     Extract extended feature set from audio:
     - MFCC features (mean + std): 40 * 2 = 80 features
     - Chroma features (mean + std): 12 * 2 = 24 features
     - Spectral features (centroid, rolloff, zero-crossing rate): 3 features
-    
+
     Total: 80 + 24 + 3 = 107 features
-    
+
     Args:
         audio: Audio waveform array
         sr: Sample rate
         n_mfcc: Number of MFCC coefficients (default: 40)
-    
+
     Returns:
         Feature vector of length 107
     """
     features = []
-    
+
     # 1. MFCC features (80 features: 40 mean + 40 std)
     mfccs = librosa.feature.mfcc(
-        y=audio,
-        sr=sr,
-        n_mfcc=n_mfcc,
-        n_fft=2048,
-        hop_length=512,
-        n_mels=128
+        y=audio, sr=sr, n_mfcc=n_mfcc, n_fft=2048, hop_length=512, n_mels=128
     )
     mfcc_mean = np.mean(mfccs, axis=1)
     mfcc_std = np.std(mfccs, axis=1)
     features.extend(mfcc_mean)
     features.extend(mfcc_std)
-    
+
     # 2. Chroma features (24 features: 12 mean + 12 std)
-    chroma = librosa.feature.chroma_stft(
-        y=audio,
-        sr=sr,
-        n_fft=2048,
-        hop_length=512
-    )
+    chroma = librosa.feature.chroma_stft(y=audio, sr=sr, n_fft=2048, hop_length=512)
     chroma_mean = np.mean(chroma, axis=1)
     chroma_std = np.std(chroma, axis=1)
     features.extend(chroma_mean)
     features.extend(chroma_std)
-    
+
     # 3. Spectral features (3 features)
     # Spectral centroid
     spectral_centroids = librosa.feature.spectral_centroid(y=audio, sr=sr)[0]
     features.append(np.mean(spectral_centroids))
-    
+
     # Spectral rolloff
     spectral_rolloff = librosa.feature.spectral_rolloff(y=audio, sr=sr)[0]
     features.append(np.mean(spectral_rolloff))
-    
+
     # Zero-crossing rate
     zcr = librosa.feature.zero_crossing_rate(audio)[0]
     features.append(np.mean(zcr))
-    
+
     return np.array(features)
 
 
@@ -375,18 +367,18 @@ def process_savee_dataset_for_training(
     n_mfcc: int = 40,
     show_progress: bool = True,
     use_augmentation: bool = True,
-    augmentation_factor: int = 2
+    augmentation_factor: int = 2,
 ) -> tuple:
     """
     Process all WAV files in SAVEE dataset for Vocal Tone model training.
-    
+
     For each WAV file:
     - Load audio waveform
     - Normalize format: mono + 16kHz + light normalization
     - Fix length: crop or pad to target_duration_sec (default 3 seconds)
     - Extract extended features: MFCC + Chroma + Spectral (107 features total)
     - Optionally apply data augmentation to increase dataset size
-    
+
     Args:
         dataset_path: Path to Savee-Classifier directory. If None, uses default path.
         target_sr: Target sample rate (default: 16000 Hz)
@@ -395,7 +387,7 @@ def process_savee_dataset_for_training(
         show_progress: Whether to print progress messages
         use_augmentation: Whether to apply data augmentation (default: True)
         augmentation_factor: Number of augmented versions per original file (default: 2)
-    
+
     Returns:
         Tuple of (X, y, labels_map) where:
         - X: numpy array of shape (#samples, #features) where #features = 107
@@ -404,138 +396,162 @@ def process_savee_dataset_for_training(
     """
     if dataset_path is None:
         dataset_path = _get_dataset_path()
-    
+
     dataset_path_obj = Path(dataset_path)
-    
+
     if not dataset_path_obj.exists():
-        raise ValueError(f'Dataset path does not exist: {dataset_path}')
-    
+        raise ValueError(f"Dataset path does not exist: {dataset_path}")
+
     if not dataset_path_obj.is_dir():
-        raise ValueError(f'Path is not a directory: {dataset_path}')
-    
+        raise ValueError(f"Path is not a directory: {dataset_path}")
+
     # Find all WAV files organized by subdirectory (each subdirectory is a label)
     wav_files = []
     labels_list = []
-    
+
     if show_progress:
-        logger.info(f'[VocalTone] Scanning dataset: {dataset_path}')
-    
+        logger.info(f"[VocalTone] Scanning dataset: {dataset_path}")
+
     # Get all subdirectories (each is a label/class)
     subdirs = [d for d in dataset_path_obj.iterdir() if d.is_dir()]
     subdirs.sort()
-    
+
     labels_map = {}
     label_to_idx = {}
-    
+
     for subdir in subdirs:
         label_name = subdir.name
         if label_name not in label_to_idx:
             idx = len(label_to_idx)
             label_to_idx[label_name] = idx
             labels_map[idx] = label_name
-        
+
         # Find all WAV files in this subdirectory
-        wav_files_in_dir = list(subdir.glob('*.wav')) + list(subdir.glob('*.WAV'))
-        
+        wav_files_in_dir = list(subdir.glob("*.wav")) + list(subdir.glob("*.WAV"))
+
         for wav_file in wav_files_in_dir:
             wav_files.append(wav_file)
             labels_list.append(label_to_idx[label_name])
-    
+
     if len(wav_files) == 0:
-        raise ValueError(f'No WAV files found in dataset: {dataset_path}')
-    
+        raise ValueError(f"No WAV files found in dataset: {dataset_path}")
+
     if show_progress:
-        logger.info(f'[VocalTone] Found {len(wav_files)} WAV files in {len(label_to_idx)} classes')
-        logger.info(f'[VocalTone] Classes: {list(label_to_idx.keys())}')
-    
+        logger.info(
+            f"[VocalTone] Found {len(wav_files)} WAV files in {len(label_to_idx)} classes"
+        )
+        logger.info(f"[VocalTone] Classes: {list(label_to_idx.keys())}")
+
     # Process each WAV file
     features_list = []
     valid_labels = []
-    
+
     target_samples = int(target_duration_sec * target_sr)
-    
+
     # Augmentation types to apply
-    augmentation_types = ['none']  # Always include original
+    augmentation_types = ["none"]  # Always include original
     if use_augmentation:
-        augmentation_types.extend(['time_stretch', 'pitch_shift', 'noise', 'time_shift'])
+        augmentation_types.extend(
+            ["time_stretch", "pitch_shift", "noise", "time_shift"]
+        )
         # Limit augmentation to augmentation_factor per file
-        augmentation_types = augmentation_types[:augmentation_factor + 1]
-    
+        augmentation_types = augmentation_types[: augmentation_factor + 1]
+
     total_files_to_process = len(wav_files) * len(augmentation_types)
     processed_count = 0
-    
+
     if show_progress:
-        print(f"   Processing {len(wav_files)} files × {len(augmentation_types)} versions = {total_files_to_process} total samples")
+        print(
+            f"   Processing {len(wav_files)} files × {len(augmentation_types)} versions = {total_files_to_process} total samples"
+        )
         print(f"   Augmentation types: {augmentation_types}")
         print(f"   This may take 15-30 minutes...")
         print()
-    
+
     for i, (wav_path, label_idx) in enumerate(zip(wav_files, labels_list)):
         try:
             if show_progress:
                 # Show progress more frequently (every 10 files or every 25 samples)
                 if (i + 1) % 10 == 0 or processed_count % 25 == 0:
                     progress_pct = (i + 1) / len(wav_files) * 100
-                    print(f"   Progress: {i + 1}/{len(wav_files)} files ({progress_pct:.1f}%) | Samples created: {processed_count}/{total_files_to_process}")
-            
+                    print(
+                        f"   Progress: {i + 1}/{len(wav_files)} files ({progress_pct:.1f}%) | Samples created: {processed_count}/{total_files_to_process}"
+                    )
+
             # Preprocess audio using standard pipeline
-            audio, sr = _preprocess_audio_file(str(wav_path), target_sr, target_duration_sec)
-            
+            audio, sr = _preprocess_audio_file(
+                str(wav_path), target_sr, target_duration_sec
+            )
+
             # Process original + augmented versions
             for aug_type in augmentation_types:
                 # Apply augmentation (if not 'none')
                 augmented_audio = augment_audio(audio.copy(), target_sr, aug_type)
-                
+
                 # Ensure length is still correct after augmentation
                 if len(augmented_audio) != target_samples:
                     if len(augmented_audio) > target_samples:
                         augmented_audio = augmented_audio[:target_samples]
                     else:
-                        augmented_audio = np.pad(augmented_audio, (0, target_samples - len(augmented_audio)), mode='constant')
-                
+                        augmented_audio = np.pad(
+                            augmented_audio,
+                            (0, target_samples - len(augmented_audio)),
+                            mode="constant",
+                        )
+
                 # Extract extended features (MFCC + Chroma + Spectral)
-                feature_vector = extract_extended_features(augmented_audio, target_sr, n_mfcc)
-                
+                feature_vector = extract_extended_features(
+                    augmented_audio, target_sr, n_mfcc
+                )
+
                 features_list.append(feature_vector)
                 valid_labels.append(label_idx)
                 processed_count += 1
-            
+
         except Exception as e:
             if show_progress:
                 print(f"   Warning: Error processing {wav_path.name}: {e}")
-            logger.warning(f'[VocalTone] Error processing {wav_path.name}: {e}')
+            logger.warning(f"[VocalTone] Error processing {wav_path.name}: {e}")
             continue
-    
+
     if len(features_list) == 0:
-        raise ValueError('No valid audio files processed')
-    
+        raise ValueError("No valid audio files processed")
+
     # Convert to numpy arrays
     X = np.array(features_list)  # Shape: (#samples, 80)
-    y = np.array(valid_labels)   # Shape: (#samples,)
-    
+    y = np.array(valid_labels)  # Shape: (#samples,)
+
     if show_progress:
         print()
         print(f"   Processing complete!")
         print(f"   X shape: {X.shape} (#samples, #features)")
         print(f"   y shape: {y.shape} (#samples,)")
-        print(f"   Features per sample: {X.shape[1]} (extended: MFCC + Chroma + Spectral)")
+        print(
+            f"   Features per sample: {X.shape[1]} (extended: MFCC + Chroma + Spectral)"
+        )
         print(f"   Number of classes: {len(labels_map)}")
         if use_augmentation:
-            print(f"   Dataset size increased from {len(wav_files)} to {X.shape[0]} samples (×{X.shape[0]/len(wav_files):.1f})")
-        logger.info(f'[VocalTone] Processing complete!')
-        logger.info(f'[VocalTone] X shape: {X.shape} (#samples, #features)')
-        logger.info(f'[VocalTone] y shape: {y.shape} (#samples,)')
-        logger.info(f'[VocalTone] Features per sample: {X.shape[1]} (extended: MFCC + Chroma + Spectral)')
-        logger.info(f'[VocalTone] Number of classes: {len(labels_map)}')
-        logger.info(f'[VocalTone] Samples per class:')
+            print(
+                f"   Dataset size increased from {len(wav_files)} to {X.shape[0]} samples (×{X.shape[0] / len(wav_files):.1f})"
+            )
+        logger.info(f"[VocalTone] Processing complete!")
+        logger.info(f"[VocalTone] X shape: {X.shape} (#samples, #features)")
+        logger.info(f"[VocalTone] y shape: {y.shape} (#samples,)")
+        logger.info(
+            f"[VocalTone] Features per sample: {X.shape[1]} (extended: MFCC + Chroma + Spectral)"
+        )
+        logger.info(f"[VocalTone] Number of classes: {len(labels_map)}")
+        logger.info(f"[VocalTone] Samples per class:")
         for label_idx, label_name in labels_map.items():
             count = np.sum(y == label_idx)
-            logger.info(f'  {label_name}: {count} samples')
-    
+            logger.info(f"  {label_name}: {count} samples")
+
     return X, y, labels_map
 
 
-def analyze_audio_whisper(audio_bytes: bytes, session_id: str, chunk_index: int) -> Dict:
+def analyze_audio_whisper(
+    audio_bytes: bytes, session_id: str, chunk_index: int
+) -> Dict:
     """
     Transcribe audio using Whisper.
 
@@ -561,35 +577,34 @@ def analyze_audio_whisper(audio_bytes: bytes, session_id: str, chunk_index: int)
 
     try:
         if isinstance(audio_bytes, (bytes, bytearray)):
-            with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as tmp_file:
+            with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp_file:
                 tmp_file.write(audio_bytes)
                 temp_path = tmp_file.name
             audio_source = temp_path
         elif isinstance(audio_bytes, str):
             audio_source = audio_bytes
         else:
-            raise ValueError(f'Unsupported audio input type: {type(audio_bytes).__name__}')
+            raise ValueError(
+                f"Unsupported audio input type: {type(audio_bytes).__name__}"
+            )
 
-        if not hasattr(analyze_audio_whisper, '_model'):
+        if not hasattr(analyze_audio_whisper, "_model"):
             logger.warning(
-                '[Whisper] Model not preloaded! Loading now (this should not happen). '
+                "[Whisper] Model not preloaded! Loading now (this should not happen). "
                 f'Model: "{Config.WHISPER_MODEL_NAME}" ({Config.WHISPER_DEVICE})'
             )
             analyze_audio_whisper._model = WhisperModel(
                 Config.WHISPER_MODEL_NAME,
                 device=Config.WHISPER_DEVICE,
-                compute_type=Config.WHISPER_COMPUTE_TYPE
+                compute_type=Config.WHISPER_COMPUTE_TYPE,
             )
 
         model = analyze_audio_whisper._model
 
-        logger.info(f'[Whisper] Starting transcription: {session_id}:{chunk_index}')
+        logger.info(f"[Whisper] Starting transcription: {session_id}:{chunk_index}")
 
         segments, info = model.transcribe(
-            audio_source,
-            beam_size=1,
-            vad_filter=True,
-            word_timestamps=False
+            audio_source, beam_size=1, vad_filter=True, word_timestamps=False
         )
 
         segment_list = []
@@ -597,63 +612,70 @@ def analyze_audio_whisper(audio_bytes: bytes, session_id: str, chunk_index: int)
         for segment in segments:
             segment_list.append(
                 {
-                    'start': float(segment.start),
-                    'end': float(segment.end),
-                    'text': segment.text
+                    "start": float(segment.start),
+                    "end": float(segment.end),
+                    "text": segment.text,
                 }
             )
             transcript_parts.append(segment.text)
 
-        transcript_text = ' '.join(part.strip() for part in transcript_parts if part).strip()
+        transcript_text = " ".join(
+            part.strip() for part in transcript_parts if part
+        ).strip()
         if transcript_text:
-            logger.info(f'[Whisper] Transcript: {transcript_text}')
+            logger.info(f"[Whisper] Transcript: {transcript_text}")
 
         processing_time_sec = time.time() - start_time
-        audio_duration = getattr(info, 'duration', None)
+        audio_duration = getattr(info, "duration", None)
         audio_duration_sec = float(audio_duration) if audio_duration else None
         rtf = (processing_time_sec / audio_duration_sec) if audio_duration_sec else None
-        audio_duration_label = f'{audio_duration_sec:.2f}s' if audio_duration_sec else 'n/a'
-        rtf_label = f'{rtf:.3f}' if rtf is not None else 'n/a'
+        audio_duration_label = (
+            f"{audio_duration_sec:.2f}s" if audio_duration_sec else "n/a"
+        )
+        rtf_label = f"{rtf:.3f}" if rtf is not None else "n/a"
 
         logger.info(
-            f'[Whisper] Completed chunk {session_id}:{chunk_index} '
-            f'in {processing_time_sec:.2f}s, '
-            f'audio_duration={audio_duration_label}, '
-            f'RTF={rtf_label}'
+            f"[Whisper] Completed chunk {session_id}:{chunk_index} "
+            f"in {processing_time_sec:.2f}s, "
+            f"audio_duration={audio_duration_label}, "
+            f"RTF={rtf_label}"
         )
 
         result = {
-            'transcript': transcript_text,
-            'confidence': getattr(info, 'language_probability', None),
-            'language': getattr(info, 'language', 'en'),
-            'segments': segment_list,
-            'processing_time_ms': int(processing_time_sec * 1000)
+            "transcript": transcript_text,
+            "confidence": getattr(info, "language_probability", None),
+            "language": getattr(info, "language", "en"),
+            "segments": segment_list,
+            "processing_time_ms": int(processing_time_sec * 1000),
         }
 
         # Stream transcription to frontend
         from services.text_streaming import stream_text
         from app import socketio
+
         text = f"{transcript_text or '(No speech detected)'}"
-        stream_text(socketio, text, session_id, {'source': 'whisper', 'chunk': chunk_index})
+        stream_text(
+            socketio, text, session_id, {"source": "whisper", "chunk": chunk_index}
+        )
 
         return result
 
     except Exception as e:
         logger.error(
-            f'[Whisper] Error processing chunk {session_id}:{chunk_index}: {e}\n'
-            f'{traceback.format_exc()}'
+            f"[Whisper] Error processing chunk {session_id}:{chunk_index}: {e}\n"
+            f"{traceback.format_exc()}"
         )
         return {
-            'error': str(e),
-            'processing_time_ms': int((time.time() - start_time) * 1000)
+            "error": str(e),
+            "processing_time_ms": int((time.time() - start_time) * 1000),
         }
     finally:
         if temp_path and os.path.exists(temp_path):
             try:
                 os.remove(temp_path)
-                logger.info(f'[Whisper] Removed temp file: {temp_path}')
+                logger.info(f"[Whisper] Removed temp file: {temp_path}")
             except Exception as cleanup_error:
-                logger.warning(f'[Whisper] Temp cleanup failed: {cleanup_error}')
+                logger.warning(f"[Whisper] Temp cleanup failed: {cleanup_error}")
 
 
 def _download_mediapipe_model(model_name: str, url: str, models_dir: Path) -> bool:
@@ -674,30 +696,35 @@ def _download_mediapipe_model(model_name: str, url: str, models_dir: Path) -> bo
         return True
 
     try:
-        logger.info(f'[MediaPipe] Downloading {model_name}...')
+        logger.info(f"[MediaPipe] Downloading {model_name}...")
         urllib.request.urlretrieve(url, model_path)
-        logger.info(f'[MediaPipe] Downloaded {model_name}')
+        logger.info(f"[MediaPipe] Downloaded {model_name}")
         return True
     except Exception as e:
-        logger.error(f'[MediaPipe] Error downloading {model_name}: {e}')
+        logger.error(f"[MediaPipe] Error downloading {model_name}: {e}")
         return False
 
 
 def _analyze_face_simple(face_landmarks_list: List) -> Dict:
     """
-    Simplified facial analysis for emotion detection.
+    Improved facial analysis with emotion intensity scoring.
 
     Args:
         face_landmarks_list: List of detected face landmarks
 
     Returns:
-        Dictionary with emotion and confidence
+        Dictionary with emotion, intensity, confidence, and detected flag
     """
     if not face_landmarks_list or len(face_landmarks_list) == 0:
-        return {'emotion': 'neutral', 'confidence': 0.0, 'detected': False}
+        return {
+            "emotion": "neutral",
+            "confidence": 0.0,
+            "intensity": 0.0,
+            "detected": False,
+        }
 
     face_landmarks = face_landmarks_list[0]
-    emotions = []
+    emotion_scores = {}  # Track emotion intensities
 
     try:
         # Mouth analysis for smile/frown
@@ -707,114 +734,305 @@ def _analyze_face_simple(face_landmarks_list: List) -> Dict:
         right_mouth_corner = face_landmarks[291]
 
         mouth_height = abs(upper_lip.y - lower_lip.y)
+        mouth_width = abs(left_mouth_corner.x - right_mouth_corner.x)
+        mouth_aspect_ratio = mouth_height / mouth_width if mouth_width > 0 else 0
         mouth_center_y = (upper_lip.y + lower_lip.y) / 2
         corners_avg_y = (left_mouth_corner.y + right_mouth_corner.y) / 2
         smile_ratio = mouth_center_y - corners_avg_y
 
-        if smile_ratio > 0.01:
-            emotions.append('happy')
-        elif smile_ratio < -0.01:
-            emotions.append('sad')
+        # Eye analysis
+        left_eye_top = face_landmarks[159]
+        left_eye_bottom = face_landmarks[145]
+        right_eye_top = face_landmarks[386]
+        right_eye_bottom = face_landmarks[374]
 
-        if mouth_height > 0.04:
-            emotions.append('surprised')
+        left_eye_height = abs(left_eye_top.y - left_eye_bottom.y)
+        right_eye_height = abs(right_eye_top.y - right_eye_bottom.y)
+        avg_eye_openness = (left_eye_height + right_eye_height) / 2
 
         # Eyebrow analysis
         left_eyebrow = face_landmarks[70]
         right_eyebrow = face_landmarks[300]
-        left_eye_top = face_landmarks[159]
-        right_eye_top = face_landmarks[386]
 
-        avg_brow_distance = (abs(left_eyebrow.y - left_eye_top.y) +
-                            abs(right_eyebrow.y - right_eye_top.y)) / 2
+        left_brow_distance = abs(left_eyebrow.y - left_eye_top.y)
+        right_brow_distance = abs(right_eyebrow.y - right_eye_top.y)
+        avg_brow_distance = (left_brow_distance + right_brow_distance) / 2
 
+        # Smile detection (wider threshold, intensity-based)
+        if smile_ratio > 0.003:
+            smile_intensity = min(abs(smile_ratio) / 0.02, 1.0)
+            if mouth_aspect_ratio < 0.15:
+                # Closed mouth smile
+                emotion_scores["happy"] = smile_intensity * 0.9
+            else:
+                # Open mouth smile
+                emotion_scores["happy"] = smile_intensity
+
+        # Frown detection
+        if smile_ratio < -0.003:
+            frown_intensity = min(abs(smile_ratio) / 0.02, 1.0)
+            emotion_scores["sad"] = frown_intensity
+
+        # Surprise detection (open mouth + wide eyes)
+        if mouth_aspect_ratio > 0.3:
+            surprise_intensity = min(mouth_aspect_ratio / 0.5, 1.0)
+            emotion_scores["surprised"] = surprise_intensity
+        elif avg_eye_openness > 0.02:
+            wide_eye_intensity = min(avg_eye_openness / 0.03, 1.0)
+            emotion_scores["surprised"] = max(
+                emotion_scores.get("surprised", 0), wide_eye_intensity * 0.7
+            )
+
+        # Concentration/skepticism (squinting)
+        if avg_eye_openness < 0.01 and "happy" not in emotion_scores:
+            emotion_scores["concentrated"] = 0.6
+
+        # Raised eyebrows + context
         if avg_brow_distance > 0.06:
-            emotions.append('surprised')
+            if "happy" in emotion_scores:
+                # Raised brows + smile = excited/engaged
+                emotion_scores["excited"] = min(emotion_scores["happy"] + 0.2, 1.0)
+                del emotion_scores["happy"]
+            elif "sad" in emotion_scores:
+                # Raised brows + frown = concerned
+                emotion_scores["concerned"] = emotion_scores["sad"]
+                del emotion_scores["sad"]
+            else:
+                # Just raised brows = surprised or engaged
+                emotion_scores["engaged"] = min(avg_brow_distance / 0.08, 1.0) * 0.8
 
-        # Default to neutral if no strong emotion
-        if not emotions:
-            emotions.append('neutral')
-        else:
-            emotions.append('engaged')
+        # Lowered brows + frown = angry/frustrated
+        if avg_brow_distance < 0.03 and "sad" in emotion_scores:
+            emotion_scores["frustrated"] = emotion_scores["sad"]
+            del emotion_scores["sad"]
 
-        # Get most common emotion
-        emotion_counts = Counter(emotions)
-        dominant_emotion = emotion_counts.most_common(1)[0][0]
-        confidence = min(emotion_counts[dominant_emotion] / len(emotions), 1.0)
+        # Default to neutral if no emotions detected
+        if not emotion_scores:
+            return {
+                "emotion": "neutral",
+                "confidence": 0.5,
+                "intensity": 0.5,
+                "detected": True,
+            }
+
+        # Return strongest emotion by intensity
+        dominant_emotion = max(emotion_scores.items(), key=lambda x: x[1])[0]
+        intensity = emotion_scores[dominant_emotion]
+        confidence = min(intensity * 1.2, 1.0)  # Scale intensity to confidence
 
         return {
-            'emotion': dominant_emotion,
-            'confidence': confidence,
-            'detected': True,
-            'all_emotions': list(set(emotions))
+            "emotion": dominant_emotion,
+            "confidence": confidence,
+            "intensity": intensity,
+            "detected": True,
+            "all_emotions": list(emotion_scores.keys()),
         }
 
     except Exception as e:
-        logger.debug(f'[MediaPipe] Face analysis error: {e}')
-        return {'emotion': 'neutral', 'confidence': 0.0, 'detected': True}
+        logger.debug(f"[MediaPipe] Face analysis error: {e}")
+        return {
+            "emotion": "neutral",
+            "confidence": 0.0,
+            "intensity": 0.0,
+            "detected": True,
+        }
 
 
 def _analyze_posture_simple(pose_landmarks_list: List) -> Dict:
     """
-    Simplified posture analysis.
+    Multi-dimensional posture analysis.
+
+    Analyzes:
+    - Lateral lean (shoulders vs hips alignment)
+    - Head tilt (ear symmetry)
+    - Forward/backward lean (z-axis depth)
+    - Shoulder symmetry (height difference)
 
     Args:
         pose_landmarks_list: List of detected pose landmarks
 
     Returns:
-        Dictionary with posture score
+        Dictionary with posture score and detected flag
     """
     if not pose_landmarks_list or len(pose_landmarks_list) == 0:
-        return {'score': 0.5, 'detected': False}
+        return {"score": 0.5, "detected": False}
 
     pose_landmarks = pose_landmarks_list[0]
-    score = 0.5  # Default fair posture
+    score = 0.7  # Start at neutral (not poor posture)
 
     try:
+        # Get key landmarks
+        nose = pose_landmarks[0]
+        left_ear = pose_landmarks[7]
+        right_ear = pose_landmarks[8]
         left_shoulder = pose_landmarks[11]
         right_shoulder = pose_landmarks[12]
         left_hip = pose_landmarks[23]
         right_hip = pose_landmarks[24]
 
-        # Check body lean
+        # 1. Lateral lean (shoulders vs hips)
         shoulder_center_x = (left_shoulder.x + right_shoulder.x) / 2
         hip_center_x = (left_hip.x + right_hip.x) / 2
-        lean = abs(shoulder_center_x - hip_center_x)
+        lateral_lean = abs(shoulder_center_x - hip_center_x)
 
-        if lean < 0.03:
-            score = 0.9  # Good upright posture
-        elif lean < 0.08:
-            score = 0.6  # Fair posture
+        if lateral_lean < 0.03:
+            score += 0.15  # Good alignment
+        elif lateral_lean < 0.08:
+            pass  # Neutral, no change
         else:
-            score = 0.3  # Poor posture
+            score -= 0.2  # Leaning too far
 
-        return {'score': score, 'detected': True}
+        # 2. Head tilt (ear symmetry)
+        head_tilt = abs(left_ear.y - right_ear.y)
+        if head_tilt > 0.1:
+            score -= 0.2  # Excessive head tilt
+        elif head_tilt < 0.03:
+            score += 0.1  # Good head alignment
+
+        # 3. Forward/backward lean (z-axis depth if available)
+        if hasattr(nose, "z") and hasattr(left_shoulder, "z"):
+            nose_z = nose.z
+            shoulder_z = (
+                (left_shoulder.z + right_shoulder.z) / 2
+                if hasattr(right_shoulder, "z")
+                else left_shoulder.z
+            )
+            forward_lean = abs(nose_z - shoulder_z)
+
+            if forward_lean > 0.3:
+                score -= 0.3  # Leaning too far forward (poor posture)
+            elif forward_lean < 0.1:
+                score -= 0.1  # Leaning backward
+            else:
+                score += 0.05  # Good forward alignment
+
+        # 4. Shoulder symmetry (height difference)
+        shoulder_height_diff = abs(left_shoulder.y - right_shoulder.y)
+        if shoulder_height_diff > 0.08:
+            score -= 0.2  # Uneven shoulders
+        elif shoulder_height_diff < 0.03:
+            score += 0.1  # Level shoulders
+
+        # Clamp score to valid range [0.0, 1.0]
+        score = max(0.0, min(1.0, score))
+
+        return {"score": score, "detected": True}
 
     except Exception as e:
-        logger.debug(f'[MediaPipe] Posture analysis error: {e}')
-        return {'score': 0.5, 'detected': True}
+        logger.debug(f"[MediaPipe] Posture analysis error: {e}")
+        return {"score": 0.5, "detected": True}
 
 
-def _analyze_hands_simple(hand_landmarks_list: List) -> Dict:
+def _analyze_hands_simple(
+    hand_landmarks_list: List, face_landmarks_list: Optional[List] = None
+) -> Dict:
     """
-    Simplified hand gesture analysis.
+    Rich hand gesture analysis.
+
+    Detects:
+    - Hand openness (fingers extended vs fist)
+    - Pointing gestures
+    - Hand proximity to face (thinking/nervous gestures)
+    - Overall gesture expressiveness
 
     Args:
         hand_landmarks_list: List of detected hand landmarks
+        face_landmarks_list: Optional face landmarks for proximity detection
 
     Returns:
-        Dictionary with hand gesture info
+        Dictionary with gesture details
     """
     if not hand_landmarks_list or len(hand_landmarks_list) == 0:
-        return {'detected': False, 'count': 0}
+        return {"detected": False, "count": 0, "gestures": {}}
+
+    def _is_hand_open(hand_landmarks):
+        """Check if hand is open (fingers extended) or closed (fist)."""
+        try:
+            # Fingertip landmarks: thumb(4), index(8), middle(12), ring(16), pinky(20)
+            # Wrist: 0
+            thumb_tip = hand_landmarks[4]
+            index_tip = hand_landmarks[8]
+            middle_tip = hand_landmarks[12]
+            ring_tip = hand_landmarks[16]
+            pinky_tip = hand_landmarks[20]
+            wrist = hand_landmarks[0]
+
+            # Calculate distances from wrist to fingertips
+            fingertip_distances = []
+            for tip in [thumb_tip, index_tip, middle_tip, ring_tip, pinky_tip]:
+                dist = ((tip.x - wrist.x) ** 2 + (tip.y - wrist.y) ** 2) ** 0.5
+                fingertip_distances.append(dist)
+
+            avg_distance = sum(fingertip_distances) / len(fingertip_distances)
+            return avg_distance > 0.3  # Threshold for "open hand"
+        except:
+            return False
+
+    def _is_pointing(hand_landmarks):
+        """Check if index finger is extended while other fingers are curled."""
+        try:
+            index_tip = hand_landmarks[8]
+            index_mcp = hand_landmarks[5]  # Metacarpophalangeal joint
+            middle_tip = hand_landmarks[12]
+            middle_mcp = hand_landmarks[9]
+
+            index_extended = abs(index_tip.y - index_mcp.y) > 0.15
+            middle_curled = abs(middle_tip.y - middle_mcp.y) < 0.1
+
+            return index_extended and middle_curled
+        except:
+            return False
+
+    def _hand_near_face(hand_landmarks, face_landmarks_list):
+        """Check if hand is near face (potential nervous gesture or thinking pose)."""
+        if not face_landmarks_list or len(face_landmarks_list) == 0:
+            return False
+
+        try:
+            hand_center = hand_landmarks[9]  # Middle finger MCP
+            face_landmarks = face_landmarks_list[0]
+            face_center = face_landmarks[1]  # Nose tip
+
+            distance = (
+                (hand_center.x - face_center.x) ** 2
+                + (hand_center.y - face_center.y) ** 2
+            ) ** 0.5
+
+            return distance < 0.2  # Hand within 20% of frame from face
+        except:
+            return False
+
+    # Analyze each hand
+    open_count = 0
+    pointing_count = 0
+    near_face_count = 0
+
+    for hand_landmarks in hand_landmarks_list:
+        if _is_hand_open(hand_landmarks):
+            open_count += 1
+        if _is_pointing(hand_landmarks):
+            pointing_count += 1
+        if _hand_near_face(hand_landmarks, face_landmarks_list):
+            near_face_count += 1
+
+    # Determine if gestures are active/expressive
+    active = open_count > 0 or pointing_count > 0
 
     return {
-        'detected': True,
-        'count': len(hand_landmarks_list)
+        "detected": True,
+        "count": len(hand_landmarks_list),
+        "gestures": {
+            "open_hands": open_count,
+            "pointing": pointing_count,
+            "near_face": near_face_count,
+            "active": active,
+        },
     }
 
 
-def analyze_video_mediapipe(video_bytes: bytes, session_id: str, chunk_index: int) -> Dict:
+def analyze_video_mediapipe(
+    video_bytes: bytes, session_id: str, chunk_index: int
+) -> Dict:
     """
     Analyze video for facial expressions, gestures, and posture using MediaPipe.
 
@@ -843,11 +1061,13 @@ def analyze_video_mediapipe(video_bytes: bytes, session_id: str, chunk_index: in
 
     try:
         video_kb = len(video_bytes) // 1024
-        logger.info(f'[MediaPipe] Analyzing video: {video_kb}KB')
+        logger.info(f"[MediaPipe] Analyzing video: {video_kb}KB")
 
         # Initialize MediaPipe models on first use (lazy loading)
-        if not hasattr(analyze_video_mediapipe, '_landmarkers'):
-            logger.warning('[MediaPipe] Models not preloaded! Initializing now (this should not happen).')
+        if not hasattr(analyze_video_mediapipe, "_landmarkers"):
+            logger.warning(
+                "[MediaPipe] Models not preloaded! Initializing now (this should not happen)."
+            )
 
             # Create models directory
             models_dir = Path(Config.MEDIAPIPE_MODEL_DIR)
@@ -855,15 +1075,15 @@ def analyze_video_mediapipe(video_bytes: bytes, session_id: str, chunk_index: in
 
             # Model URLs
             model_urls = {
-                Config.MEDIAPIPE_FACE_MODEL: 'https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task',
-                Config.MEDIAPIPE_POSE_MODEL: 'https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task',
-                Config.MEDIAPIPE_HAND_MODEL: 'https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task'
+                Config.MEDIAPIPE_FACE_MODEL: "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task",
+                Config.MEDIAPIPE_POSE_MODEL: "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task",
+                Config.MEDIAPIPE_HAND_MODEL: "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task",
             }
 
             # Download models if needed
             for model_name, url in model_urls.items():
                 if not _download_mediapipe_model(model_name, url, models_dir):
-                    raise RuntimeError(f'Failed to download {model_name}')
+                    raise RuntimeError(f"Failed to download {model_name}")
 
             # Initialize landmarkers
             base_options_face = mp.tasks.BaseOptions(
@@ -882,7 +1102,7 @@ def analyze_video_mediapipe(video_bytes: bytes, session_id: str, chunk_index: in
                 num_faces=1,
                 min_face_detection_confidence=Config.MEDIAPIPE_FACE_MIN_DETECTION_CONFIDENCE,
                 min_face_presence_confidence=Config.MEDIAPIPE_FACE_MIN_PRESENCE_CONFIDENCE,
-                min_tracking_confidence=Config.MEDIAPIPE_FACE_MIN_TRACKING_CONFIDENCE
+                min_tracking_confidence=Config.MEDIAPIPE_FACE_MIN_TRACKING_CONFIDENCE,
             )
 
             pose_options = mp.tasks.vision.PoseLandmarkerOptions(
@@ -890,7 +1110,7 @@ def analyze_video_mediapipe(video_bytes: bytes, session_id: str, chunk_index: in
                 running_mode=mp.tasks.vision.RunningMode.IMAGE,
                 min_pose_detection_confidence=Config.MEDIAPIPE_POSE_MIN_DETECTION_CONFIDENCE,
                 min_pose_presence_confidence=Config.MEDIAPIPE_POSE_MIN_PRESENCE_CONFIDENCE,
-                min_tracking_confidence=Config.MEDIAPIPE_POSE_MIN_TRACKING_CONFIDENCE
+                min_tracking_confidence=Config.MEDIAPIPE_POSE_MIN_TRACKING_CONFIDENCE,
             )
 
             hand_options = mp.tasks.vision.HandLandmarkerOptions(
@@ -899,35 +1119,41 @@ def analyze_video_mediapipe(video_bytes: bytes, session_id: str, chunk_index: in
                 num_hands=2,
                 min_hand_detection_confidence=Config.MEDIAPIPE_HAND_MIN_DETECTION_CONFIDENCE,
                 min_hand_presence_confidence=Config.MEDIAPIPE_HAND_MIN_PRESENCE_CONFIDENCE,
-                min_tracking_confidence=Config.MEDIAPIPE_HAND_MIN_TRACKING_CONFIDENCE
+                min_tracking_confidence=Config.MEDIAPIPE_HAND_MIN_TRACKING_CONFIDENCE,
             )
 
             analyze_video_mediapipe._landmarkers = {
-                'face': mp.tasks.vision.FaceLandmarker.create_from_options(face_options),
-                'pose': mp.tasks.vision.PoseLandmarker.create_from_options(pose_options),
-                'hand': mp.tasks.vision.HandLandmarker.create_from_options(hand_options)
+                "face": mp.tasks.vision.FaceLandmarker.create_from_options(
+                    face_options
+                ),
+                "pose": mp.tasks.vision.PoseLandmarker.create_from_options(
+                    pose_options
+                ),
+                "hand": mp.tasks.vision.HandLandmarker.create_from_options(
+                    hand_options
+                ),
             }
 
-            logger.info('[MediaPipe] Models initialized successfully')
+            logger.info("[MediaPipe] Models initialized successfully")
 
         # Save video bytes to temporary file
-        with tempfile.NamedTemporaryFile(suffix='.mp4', delete=False) as tmp_file:
+        with tempfile.NamedTemporaryFile(suffix=".mp4", delete=False) as tmp_file:
             tmp_file.write(video_bytes)
             temp_path = tmp_file.name
 
         # Open video with OpenCV
         cap = cv2.VideoCapture(temp_path)
         if not cap.isOpened():
-            raise ValueError(f'Could not open video file')
+            raise ValueError(f"Could not open video file")
 
         fps = cap.get(cv2.CAP_PROP_FPS)
         total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
         duration_sec = total_frames / fps if fps > 0 else 0
 
         logger.info(
-            f'[MediaPipe] Video properties for {session_id}:{chunk_index}: '
-            f'{total_frames} frames, {fps:.2f} fps, {duration_sec:.2f}s duration, '
-            f'sample_rate={Config.MEDIAPIPE_FRAME_SAMPLE_RATE}'
+            f"[MediaPipe] Video properties for {session_id}:{chunk_index}: "
+            f"{total_frames} frames, {fps:.2f} fps, {duration_sec:.2f}s duration, "
+            f"sample_rate={Config.MEDIAPIPE_FRAME_SAMPLE_RATE}"
         )
 
         frame_count = 0
@@ -954,9 +1180,15 @@ def analyze_video_mediapipe(video_bytes: bytes, session_id: str, chunk_index: in
 
                 # Process with landmarkers (IMAGE mode - no timestamp needed)
                 try:
-                    face_result = analyze_video_mediapipe._landmarkers['face'].detect(mp_image)
-                    pose_result = analyze_video_mediapipe._landmarkers['pose'].detect(mp_image)
-                    hand_result = analyze_video_mediapipe._landmarkers['hand'].detect(mp_image)
+                    face_result = analyze_video_mediapipe._landmarkers["face"].detect(
+                        mp_image
+                    )
+                    pose_result = analyze_video_mediapipe._landmarkers["pose"].detect(
+                        mp_image
+                    )
+                    hand_result = analyze_video_mediapipe._landmarkers["hand"].detect(
+                        mp_image
+                    )
 
                     all_face_results.append(face_result.face_landmarks)
                     all_pose_results.append(pose_result.pose_landmarks)
@@ -964,106 +1196,167 @@ def analyze_video_mediapipe(video_bytes: bytes, session_id: str, chunk_index: in
 
                     frames_analyzed += 1
                 except Exception as e:
-                    logger.debug(f'[MediaPipe] Frame {frame_count} processing error: {e}')
+                    logger.debug(
+                        f"[MediaPipe] Frame {frame_count} processing error: {e}"
+                    )
 
             frame_count += 1
 
         cap.release()
 
-        # Analyze aggregated results
-        emotions_list = []
+        # Analyze aggregated results with intensity-weighted emotion scoring
+        face_analyses = []
+        emotion_scores = {}  # Track emotion intensities
         emotion_confidences = []
         posture_scores = []
+        hand_gestures = {
+            "open_hands": 0,
+            "pointing": 0,
+            "near_face": 0,
+            "active": False,
+        }
         hand_detected_count = 0
 
+        # Analyze face landmarks with intensity scoring
         for face_landmarks in all_face_results:
             face_analysis = _analyze_face_simple(face_landmarks)
-            if face_analysis['detected']:
-                emotions_list.append(face_analysis['emotion'])
-                emotion_confidences.append(face_analysis['confidence'])
+            if face_analysis["detected"]:
+                face_analyses.append(face_analysis)
+                emotion = face_analysis["emotion"]
+                intensity = face_analysis.get("intensity", 1.0)
+                emotion_scores[emotion] = emotion_scores.get(emotion, 0) + intensity
+                emotion_confidences.append(face_analysis["confidence"])
 
+        # Analyze posture
         for pose_landmarks in all_pose_results:
             posture_analysis = _analyze_posture_simple(pose_landmarks)
-            if posture_analysis['detected']:
-                posture_scores.append(posture_analysis['score'])
+            if posture_analysis["detected"]:
+                posture_scores.append(posture_analysis["score"])
 
-        for hand_landmarks in all_hand_results:
-            hand_analysis = _analyze_hands_simple(hand_landmarks)
-            if hand_analysis['detected']:
+        # Analyze hands with rich gesture detection (pass face landmarks for proximity)
+        for i, hand_landmarks in enumerate(all_hand_results):
+            # Get corresponding face landmarks if available
+            face_landmarks = all_face_results[i] if i < len(all_face_results) else None
+            hand_analysis = _analyze_hands_simple(hand_landmarks, face_landmarks)
+            if hand_analysis["detected"]:
                 hand_detected_count += 1
+                gestures = hand_analysis.get("gestures", {})
+                hand_gestures["open_hands"] += gestures.get("open_hands", 0)
+                hand_gestures["pointing"] += gestures.get("pointing", 0)
+                hand_gestures["near_face"] += gestures.get("near_face", 0)
+                if gestures.get("active", False):
+                    hand_gestures["active"] = True
 
-        # Calculate final metrics
-        dominant_emotion = Counter(emotions_list).most_common(1)[0][0] if emotions_list else 'neutral'
-        avg_emotion_confidence = sum(emotion_confidences) / len(emotion_confidences) if emotion_confidences else 0.0
-        avg_posture_score = sum(posture_scores) / len(posture_scores) if posture_scores else 0.5
+        # Calculate final metrics using intensity-weighted voting
+        if emotion_scores:
+            dominant_emotion = max(emotion_scores.items(), key=lambda x: x[1])[0]
+        else:
+            dominant_emotion = "neutral"
+
+        avg_emotion_confidence = (
+            sum(emotion_confidences) / len(emotion_confidences)
+            if emotion_confidences
+            else 0.0
+        )
+        avg_posture_score = (
+            sum(posture_scores) / len(posture_scores) if posture_scores else 0.5
+        )
         hand_gestures_detected = hand_detected_count > 0
 
         # Log analysis results
         logger.info(
-            f'[MediaPipe] Analysis: emotion={dominant_emotion} (conf={avg_emotion_confidence:.2f}), '
-            f'posture={avg_posture_score:.2f}, hands={hand_gestures_detected}, '
-            f'face_detected={len(emotions_list) > 0}, pose_detected={len(posture_scores) > 0}'
+            f"[MediaPipe] Analysis: emotion={dominant_emotion} (conf={avg_emotion_confidence:.2f}), "
+            f"posture={avg_posture_score:.2f}, hands={hand_gestures_detected}, "
+            f"face_detected={len(face_analyses) > 0}, pose_detected={len(posture_scores) > 0}"
         )
 
-        # Calculate engagement score
-        face_visibility_score = len(emotions_list) / max(frames_analyzed, 1)
-        positive_emotion_score = 1.0 if dominant_emotion in ['happy', 'engaged'] else 0.5
+        # Calculate engagement score with granular emotion weights
+        face_visibility_score = len(face_analyses) / max(frames_analyzed, 1)
+
+        # Granular emotion weights (not just binary 1.0/0.5)
+        emotion_weights = {
+            "happy": 1.0,
+            "excited": 0.95,
+            "surprised": 0.8,
+            "engaged": 0.9,
+            "neutral": 0.5,
+            "concentrated": 0.7,
+            "confused": 0.4,
+            "concerned": 0.45,
+            "sad": 0.3,
+            "frustrated": 0.25,
+        }
+        positive_emotion_score = emotion_weights.get(dominant_emotion, 0.5)
+
         posture_contribution = avg_posture_score
-        hand_contribution = 1.0 if hand_gestures_detected else 0.5
+
+        # Rich hand gesture contribution
+        if hand_gestures_detected:
+            if hand_gestures["active"]:
+                hand_contribution = 1.0  # Expressive gestures (open/pointing)
+            elif hand_gestures["near_face"] > 0:
+                hand_contribution = 0.7  # Thinking/contemplative pose
+            else:
+                hand_contribution = 0.8  # Hands visible but passive
+        else:
+            hand_contribution = 0.5  # No hands detected
 
         engagement_score = (
-            face_visibility_score * 0.2 +
-            positive_emotion_score * 0.3 +
-            posture_contribution * 0.3 +
-            hand_contribution * 0.2
+            face_visibility_score * 0.2
+            + positive_emotion_score * 0.3
+            + posture_contribution * 0.3
+            + hand_contribution * 0.2
         )
 
         processing_time = int((time.time() - start_time) * 1000)
 
         result = {
-            'emotions': list(set(emotions_list)) if emotions_list else ['neutral'],
-            'dominant_emotion': dominant_emotion,
-            'emotion_confidence': round(avg_emotion_confidence, 2),
-            'posture_score': round(avg_posture_score, 2),
-            'engagement_score': round(engagement_score, 2),
-            'hand_gestures_detected': hand_gestures_detected,
-            'facial_landmarks_detected': len(emotions_list) > 0,
-            'pose_landmarks_detected': len(posture_scores) > 0,
-            'frames_analyzed': frames_analyzed,
-            'processing_time_ms': processing_time
+            "emotions": list(emotion_scores.keys()) if emotion_scores else ["neutral"],
+            "dominant_emotion": dominant_emotion,
+            "emotion_confidence": round(avg_emotion_confidence, 2),
+            "posture_score": round(avg_posture_score, 2),
+            "engagement_score": round(engagement_score, 2),
+            "hand_gestures_detected": hand_gestures_detected,
+            "facial_landmarks_detected": len(face_analyses) > 0,
+            "pose_landmarks_detected": len(posture_scores) > 0,
+            "frames_analyzed": frames_analyzed,
+            "processing_time_ms": processing_time,
         }
 
         logger.info(
-            f'[MediaPipe] Completed chunk {session_id}:{chunk_index} in {processing_time}ms '
-            f'(analyzed {frames_analyzed} frames, emotion: {dominant_emotion}, '
-            f'posture: {avg_posture_score:.2f}, engagement: {engagement_score:.2f})'
+            f"[MediaPipe] Completed chunk {session_id}:{chunk_index} in {processing_time}ms "
+            f"(analyzed {frames_analyzed} frames, emotion: {dominant_emotion}, "
+            f"posture: {avg_posture_score:.2f}, engagement: {engagement_score:.2f})"
         )
 
         # Stream analysis to frontend
         from services.text_streaming import stream_text
         from app import socketio
+
         text = f"{dominant_emotion} | Posture: {avg_posture_score:.0%} | Engagement: {engagement_score:.0%}"
-        stream_text(socketio, text, session_id, {'source': 'mediapipe', 'chunk': chunk_index})
+        stream_text(
+            socketio, text, session_id, {"source": "mediapipe", "chunk": chunk_index}
+        )
 
         return result
 
     except Exception as e:
         logger.error(
-            f'[MediaPipe] Error processing chunk {session_id}:{chunk_index}: {e}\n'
-            f'{traceback.format_exc()}'
+            f"[MediaPipe] Error processing chunk {session_id}:{chunk_index}: {e}\n"
+            f"{traceback.format_exc()}"
         )
         return {
-            'error': str(e),
-            'processing_time_ms': int((time.time() - start_time) * 1000)
+            "error": str(e),
+            "processing_time_ms": int((time.time() - start_time) * 1000),
         }
 
     finally:
         if temp_path and os.path.exists(temp_path):
             try:
                 os.remove(temp_path)
-                logger.debug(f'[MediaPipe] Removed temp file: {temp_path}')
+                logger.debug(f"[MediaPipe] Removed temp file: {temp_path}")
             except Exception as cleanup_error:
-                logger.warning(f'[MediaPipe] Temp cleanup failed: {cleanup_error}')
+                logger.warning(f"[MediaPipe] Temp cleanup failed: {cleanup_error}")
 
 
 def analyze_vocal_tone(audio_bytes: bytes, session_id: str, chunk_index: int) -> Dict:
@@ -1095,53 +1388,61 @@ def analyze_vocal_tone(audio_bytes: bytes, session_id: str, chunk_index: int) ->
 
     try:
         audio_kb = len(audio_bytes) // 1024
-        logger.info(f'[VocalTone] Analyzing audio: {audio_kb}KB')
+        logger.info(f"[VocalTone] Analyzing audio: {audio_kb}KB")
 
         # Create temporary WAV file from audio_bytes (same pattern as Whisper)
         if isinstance(audio_bytes, (bytes, bytearray)):
-            with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as tmp_file:
+            with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp_file:
                 tmp_file.write(audio_bytes)
                 temp_path = tmp_file.name
             audio_source = temp_path
         elif isinstance(audio_bytes, str):
             audio_source = audio_bytes
         else:
-            raise ValueError(f'Unsupported audio input type: {type(audio_bytes).__name__}')
+            raise ValueError(
+                f"Unsupported audio input type: {type(audio_bytes).__name__}"
+            )
 
         # Load model files (lazy loading - only load once)
-        if not hasattr(analyze_vocal_tone, '_model'):
-            logger.warning('[VocalTone] Model not preloaded! Loading now (this should not happen).')
-            
-            # Use VOCAL_TONE_MODEL_DIR if set, else default backend/models/vocal_tone
+        if not hasattr(analyze_vocal_tone, "_model"):
+            logger.warning(
+                "[VocalTone] Model not preloaded! Loading now (this should not happen)."
+            )
+
+            # Use VOCAL_TONE_MODEL_DIR if set, else default backend/vocal_tone_model/models
             if Config.VOCAL_TONE_MODEL_DIR:
                 models_dir = Path(Config.VOCAL_TONE_MODEL_DIR)
             else:
                 backend_dir = Path(__file__).parent
-                models_dir = backend_dir / 'models' / 'vocal_tone'
-            model_path = models_dir / 'vocal_tone_model.pkl'
-            scaler_path = models_dir / 'vocal_tone_scaler.pkl'
-            labels_path = models_dir / 'vocal_tone_labels.pkl'
+                models_dir = backend_dir / "vocal_tone_model" / "models"
+            model_path = models_dir / "vocal_tone_model.pkl"
+            scaler_path = models_dir / "vocal_tone_scaler.pkl"
+            labels_path = models_dir / "vocal_tone_labels.pkl"
 
             if not model_path.exists():
-                error_msg = f'Vocal Tone model not found: {model_path}. Please train the model first.'
-                logger.error(f'[VocalTone] {error_msg}')
+                error_msg = f"Vocal Tone model not found: {model_path}. Please train the model first."
+                logger.error(f"[VocalTone] {error_msg}")
                 return {
-                    'error': error_msg,
-                    'processing_time_ms': int((time.time() - start_time) * 1000)
+                    "error": error_msg,
+                    "processing_time_ms": int((time.time() - start_time) * 1000),
                 }
 
             try:
                 analyze_vocal_tone._model = joblib.load(model_path)
                 analyze_vocal_tone._scaler = joblib.load(scaler_path)
                 analyze_vocal_tone._labels_map = joblib.load(labels_path)
-                logger.info(f'[VocalTone] Model loaded: {type(analyze_vocal_tone._model).__name__}')
-                logger.info(f'[VocalTone] Labels: {len(analyze_vocal_tone._labels_map)} classes')
+                logger.info(
+                    f"[VocalTone] Model loaded: {type(analyze_vocal_tone._model).__name__}"
+                )
+                logger.info(
+                    f"[VocalTone] Labels: {len(analyze_vocal_tone._labels_map)} classes"
+                )
             except Exception as e:
-                error_msg = f'Failed to load Vocal Tone model: {e}'
-                logger.error(f'[VocalTone] {error_msg}')
+                error_msg = f"Failed to load Vocal Tone model: {e}"
+                logger.error(f"[VocalTone] {error_msg}")
                 return {
-                    'error': error_msg,
-                    'processing_time_ms': int((time.time() - start_time) * 1000)
+                    "error": error_msg,
+                    "processing_time_ms": int((time.time() - start_time) * 1000),
                 }
 
         model = analyze_vocal_tone._model
@@ -1178,7 +1479,7 @@ def analyze_vocal_tone(audio_bytes: bytes, session_id: str, chunk_index: int) ->
             pitch = pitches[index, t]
             if pitch > 0:
                 pitch_values.append(pitch)
-        
+
         pitch_mean = float(np.mean(pitch_values)) if pitch_values else 0.0
         pitch_std = float(np.std(pitch_values)) if pitch_values else 0.0
 
@@ -1195,156 +1496,293 @@ def analyze_vocal_tone(audio_bytes: bytes, session_id: str, chunk_index: int) ->
 
         # Build emotion probabilities dictionary
         emotion_probs = {
-            labels_map[i]: float(prob) 
-            for i, prob in enumerate(probabilities)
+            labels_map[i]: float(prob) for i, prob in enumerate(probabilities)
         }
 
         processing_time = int((time.time() - start_time) * 1000)
 
         result = {
-            'emotion': predicted_emotion,
-            'confidence': float(confidence),
-            'emotion_probabilities': emotion_probs,
-            'pitch_mean': pitch_mean,
-            'pitch_std': pitch_std,
-            'tempo': tempo_value,
-            'energy_level': energy,
-            'processing_time_ms': processing_time
+            "emotion": predicted_emotion,
+            "confidence": float(confidence),
+            "emotion_probabilities": emotion_probs,
+            "pitch_mean": pitch_mean,
+            "pitch_std": pitch_std,
+            "tempo": tempo_value,
+            "energy_level": energy,
+            "processing_time_ms": processing_time,
         }
 
         logger.info(
-            f'[VocalTone] Completed chunk {session_id}:{chunk_index} in {processing_time}ms: '
-            f'emotion={predicted_emotion} (conf={confidence:.3f}), '
-            f'pitch={pitch_mean:.1f}Hz, tempo={tempo_value:.1f}BPM'
+            f"[VocalTone] Completed chunk {session_id}:{chunk_index} in {processing_time}ms: "
+            f"emotion={predicted_emotion} (conf={confidence:.3f}), "
+            f"pitch={pitch_mean:.1f}Hz, tempo={tempo_value:.1f}BPM"
         )
 
         # Stream vocal analysis to frontend
         from services.text_streaming import stream_text
         from app import socketio
+
         text = f"{predicted_emotion} ({confidence:.0%}) | Pitch: {pitch_mean:.0f}Hz | Tempo: {tempo_value:.0f}BPM"
-        stream_text(socketio, text, session_id, {'source': 'vocaltone', 'chunk': chunk_index})
+        stream_text(
+            socketio, text, session_id, {"source": "vocaltone", "chunk": chunk_index}
+        )
 
         return result
 
     except Exception as e:
         logger.error(
-            f'[VocalTone] Error processing chunk {session_id}:{chunk_index}: {e}\n'
-            f'{traceback.format_exc()}'
+            f"[VocalTone] Error processing chunk {session_id}:{chunk_index}: {e}\n"
+            f"{traceback.format_exc()}"
         )
         return {
-            'error': str(e),
-            'processing_time_ms': int((time.time() - start_time) * 1000)
+            "error": str(e),
+            "processing_time_ms": int((time.time() - start_time) * 1000),
         }
     finally:
         # Clean up temp file (same pattern as Whisper)
         if temp_path and os.path.exists(temp_path):
             try:
                 os.remove(temp_path)
-                logger.debug(f'[VocalTone] Removed temp file: {temp_path}')
+                logger.debug(f"[VocalTone] Removed temp file: {temp_path}")
             except Exception as cleanup_error:
-                logger.warning(f'[VocalTone] Temp cleanup failed: {cleanup_error}')
+                logger.warning(f"[VocalTone] Temp cleanup failed: {cleanup_error}")
+
+
+def analyze_clifton_fusion(
+    data_bytes: bytes,
+    session_id: str,
+    chunk_index: int,
+    dependencies: Optional[Dict] = None,
+) -> Dict:
+    """
+    Clifton Strengths domain prediction from Whisper + VocalTone fusion.
+
+    Args:
+        data_bytes: Not used (fusion model only needs dependency outputs)
+        session_id: Session identifier
+        chunk_index: Chunk index
+        dependencies: Dict with {model_name: result_dict} from dependency models
+
+    Returns:
+        Dict with predicted_domain, confidence, domain_probabilities
+    """
+    start_time = time.time()
+    logger.info(f"[CliftonFusion] Processing session={session_id}, chunk={chunk_index}")
+
+    try:
+        # Validate dependencies
+        if (
+            not dependencies
+            or "whisper" not in dependencies
+            or "vocaltone" not in dependencies
+        ):
+            raise ValueError("Missing required dependencies: whisper, vocaltone")
+
+        whisper_result = dependencies["whisper"]
+        vocaltone_result = dependencies["vocaltone"]
+
+        # Check for errors in dependencies
+        if "error" in whisper_result or "error" in vocaltone_result:
+            raise ValueError("One or more dependency models failed")
+
+        # Lazy load model
+        if not hasattr(analyze_clifton_fusion, "_model"):
+            model_dir = os.path.join(
+                os.path.dirname(__file__), "clifton_model", "models"
+            )
+
+            from clifton_model.fusion_model import CliftonFusionModel
+
+            # Model will automatically use Config.CLIFTON_DEVELOPMENT_THRESHOLD
+            analyze_clifton_fusion._model = CliftonFusionModel(model_dir)
+            logger.info("[CliftonFusion] Model instance created")
+
+        model = analyze_clifton_fusion._model
+
+        # Predict
+        prediction = model.predict(whisper_result, vocaltone_result)
+
+        processing_time = int((time.time() - start_time) * 1000)
+        result = {**prediction, "processing_time_ms": processing_time}
+
+        logger.info(
+            f"[CliftonFusion] Completed chunk {session_id}:{chunk_index} in {processing_time}ms: "
+            f"domain={prediction['predicted_domain']} (conf={prediction['confidence']:.3f})"
+        )
+
+        # Stream to frontend
+        from services.text_streaming import stream_text
+        from app import socketio
+
+        domain = prediction["predicted_domain"]
+        confidence = prediction["confidence"]
+        dev_opportunities = prediction.get("development_opportunities", [])
+
+        # Build output text
+        text = f"Clifton Domain: {domain} ({confidence:.0%})"
+
+        if dev_opportunities:
+            # Format development opportunities for interviewer insight
+            opportunities_text = ", ".join(dev_opportunities)
+            text += f"\nDevelopment Areas: {opportunities_text}"
+
+        stream_text(
+            socketio,
+            text,
+            session_id,
+            {"source": "clifton_fusion", "chunk": chunk_index},
+        )
+
+        return result
+
+    except Exception as e:
+        logger.error(f"[CliftonFusion] Error: {e}", exc_info=True)
+        return {
+            "error": str(e),
+            "processing_time_ms": int((time.time() - start_time) * 1000),
+        }
 
 
 # =============================================================================
 # SUMMARY LOGGING
 # =============================================================================
 
+
 def log_chunk_summary(session_id: str, chunk_index: int, results: Dict):
     """
     Print a formatted summary of all model results for a chunk.
-    
+
     Args:
         session_id: Session identifier
         chunk_index: Chunk index
         results: Dictionary with all model results
     """
-    logger.info('')
-    logger.info('=' * 80)
-    logger.info(f'CHUNK SUMMARY: {session_id}:{chunk_index}')
-    logger.info('=' * 80)
+    logger.info("")
+    logger.info("=" * 80)
+    logger.info(f"CHUNK SUMMARY: {session_id}:{chunk_index}")
+    logger.info("=" * 80)
 
     # Whisper results
-    if 'whisper' in results:
-        whisper_result = results['whisper']
-        if 'error' in whisper_result:
-            logger.info('[Whisper] Transcription: FAILED')
-            logger.info(f'   Error: {whisper_result["error"]}')
+    if "whisper" in results:
+        whisper_result = results["whisper"]
+        if "error" in whisper_result:
+            logger.info("[Whisper] Transcription: FAILED")
+            logger.info(f"   Error: {whisper_result['error']}")
         else:
-            transcript = whisper_result.get('transcript', '')
-            language = whisper_result.get('language', 'unknown')
-            confidence = whisper_result.get('confidence')
-            processing_time = whisper_result.get('processing_time_ms', 0)
+            transcript = whisper_result.get("transcript", "")
+            language = whisper_result.get("language", "unknown")
+            confidence = whisper_result.get("confidence")
+            processing_time = whisper_result.get("processing_time_ms", 0)
 
-            logger.info('[Whisper] Transcription: SUCCESS')
+            logger.info("[Whisper] Transcription: SUCCESS")
             if transcript:
                 # Truncate long transcripts for readability
-                display_transcript = transcript[:200] + '...' if len(transcript) > 200 else transcript
+                display_transcript = (
+                    transcript[:200] + "..." if len(transcript) > 200 else transcript
+                )
                 logger.info(f'   Transcript: "{display_transcript}"')
             else:
-                logger.info('   Transcript: (no speech detected)')
-            logger.info(f'   Language: {language}')
+                logger.info("   Transcript: (no speech detected)")
+            logger.info(f"   Language: {language}")
             if confidence is not None:
-                logger.info(f'   Confidence: {confidence:.3f}')
-            logger.info(f'   Processing time: {processing_time}ms')
-    
+                logger.info(f"   Confidence: {confidence:.3f}")
+            logger.info(f"   Processing time: {processing_time}ms")
+
     # MediaPipe results
-    if 'mediapipe' in results:
-        mediapipe_result = results['mediapipe']
-        if 'error' in mediapipe_result:
-            logger.info('[MediaPipe] Video Analysis: FAILED')
-            logger.info(f'   Error: {mediapipe_result["error"]}')
+    if "mediapipe" in results:
+        mediapipe_result = results["mediapipe"]
+        if "error" in mediapipe_result:
+            logger.info("[MediaPipe] Video Analysis: FAILED")
+            logger.info(f"   Error: {mediapipe_result['error']}")
         else:
-            emotion = mediapipe_result.get('dominant_emotion', 'unknown')
-            emotion_conf = mediapipe_result.get('emotion_confidence', 0)
-            posture = mediapipe_result.get('posture_score', 0)
-            engagement = mediapipe_result.get('engagement_score', 0)
-            hands = mediapipe_result.get('hand_gestures_detected', False)
-            frames = mediapipe_result.get('frames_analyzed', 0)
-            processing_time = mediapipe_result.get('processing_time_ms', 0)
+            emotion = mediapipe_result.get("dominant_emotion", "unknown")
+            emotion_conf = mediapipe_result.get("emotion_confidence", 0)
+            posture = mediapipe_result.get("posture_score", 0)
+            engagement = mediapipe_result.get("engagement_score", 0)
+            hands = mediapipe_result.get("hand_gestures_detected", False)
+            frames = mediapipe_result.get("frames_analyzed", 0)
+            processing_time = mediapipe_result.get("processing_time_ms", 0)
 
-            logger.info('[MediaPipe] Video Analysis: SUCCESS')
-            logger.info(f'   Dominant Emotion: {emotion} (confidence: {emotion_conf:.2f})')
-            logger.info(f'   Posture Score: {posture:.2f}')
-            logger.info(f'   Engagement Score: {engagement:.2f}')
-            logger.info(f'   Hand Gestures: {"Yes" if hands else "No"}')
-            logger.info(f'   Frames Analyzed: {frames}')
-            logger.info(f'   Processing time: {processing_time}ms')
-    
+            logger.info("[MediaPipe] Video Analysis: SUCCESS")
+            logger.info(
+                f"   Dominant Emotion: {emotion} (confidence: {emotion_conf:.2f})"
+            )
+            logger.info(f"   Posture Score: {posture:.2f}")
+            logger.info(f"   Engagement Score: {engagement:.2f}")
+            logger.info(f"   Hand Gestures: {'Yes' if hands else 'No'}")
+            logger.info(f"   Frames Analyzed: {frames}")
+            logger.info(f"   Processing time: {processing_time}ms")
+
     # VocalTone results
-    if 'vocaltone' in results:
-        vocaltone_result = results['vocaltone']
-        if 'error' in vocaltone_result:
-            logger.info('[VocalTone] Audio Emotion: FAILED')
-            logger.info(f'   Error: {vocaltone_result["error"]}')
+    if "vocaltone" in results:
+        vocaltone_result = results["vocaltone"]
+        if "error" in vocaltone_result:
+            logger.info("[VocalTone] Audio Emotion: FAILED")
+            logger.info(f"   Error: {vocaltone_result['error']}")
         else:
-            emotion = vocaltone_result.get('emotion', 'unknown')
-            confidence = vocaltone_result.get('confidence', 0)
-            pitch_mean = vocaltone_result.get('pitch_mean', 0)
-            tempo = vocaltone_result.get('tempo', 0)
-            energy = vocaltone_result.get('energy_level', 0)
-            processing_time = vocaltone_result.get('processing_time_ms', 0)
+            emotion = vocaltone_result.get("emotion", "unknown")
+            confidence = vocaltone_result.get("confidence", 0)
+            pitch_mean = vocaltone_result.get("pitch_mean", 0)
+            tempo = vocaltone_result.get("tempo", 0)
+            energy = vocaltone_result.get("energy_level", 0)
+            processing_time = vocaltone_result.get("processing_time_ms", 0)
 
-            logger.info('[VocalTone] Audio Emotion: SUCCESS')
-            logger.info(f'   Predicted Emotion: {emotion} (confidence: {confidence:.3f})')
-            logger.info(f'   Pitch Mean: {pitch_mean:.1f} Hz')
-            logger.info(f'   Tempo: {tempo:.1f} BPM')
-            logger.info(f'   Energy Level: {energy:.3f}')
-            logger.info(f'   Processing time: {processing_time}ms')
-    
+            logger.info("[VocalTone] Audio Emotion: SUCCESS")
+            logger.info(
+                f"   Predicted Emotion: {emotion} (confidence: {confidence:.3f})"
+            )
+            logger.info(f"   Pitch Mean: {pitch_mean:.1f} Hz")
+            logger.info(f"   Tempo: {tempo:.1f} BPM")
+            logger.info(f"   Energy Level: {energy:.3f}")
+            logger.info(f"   Processing time: {processing_time}ms")
+
+    # Clifton Fusion results
+    if "clifton_fusion" in results:
+        clifton_result = results["clifton_fusion"]
+        if "error" in clifton_result:
+            logger.info("[CliftonFusion] Strengths Domain: FAILED")
+            logger.info(f"   Error: {clifton_result['error']}")
+        else:
+            domain = clifton_result.get("predicted_domain", "unknown")
+            confidence = clifton_result.get("confidence", 0)
+            domain_probs = clifton_result.get("domain_probabilities", {})
+            processing_time = clifton_result.get("processing_time_ms", 0)
+
+            logger.info("[CliftonFusion] Clifton Strengths Domain: SUCCESS")
+            logger.info(f"   Predicted Domain: {domain} (confidence: {confidence:.3f})")
+            if domain_probs:
+                # Show all domain probabilities sorted by score
+                sorted_domains = sorted(
+                    domain_probs.items(), key=lambda x: x[1], reverse=True
+                )
+                logger.info("   Domain Probabilities:")
+                for dom, prob in sorted_domains:
+                    logger.info(f"      {dom}: {prob:.3f}")
+
+            # Show development opportunities
+            dev_opportunities = clifton_result.get("development_opportunities", [])
+            if dev_opportunities:
+                logger.info(f"   Development Areas: {', '.join(dev_opportunities)}")
+
+            logger.info(f"   Processing time: {processing_time}ms")
+
     # Overall summary
-    total_time = results.get('total_processing_time_ms', 0)
+    total_time = results.get("total_processing_time_ms", 0)
     # Count successful models (exclude total_processing_time_ms which is an int)
-    model_keys = [k for k in results.keys() if k != 'total_processing_time_ms']
-    success_count = sum(1 for k in model_keys 
-                       if isinstance(results[k], dict) and 'error' not in results[k])
+    model_keys = [k for k in results.keys() if k != "total_processing_time_ms"]
+    success_count = sum(
+        1
+        for k in model_keys
+        if isinstance(results[k], dict) and "error" not in results[k]
+    )
     total_models = len(model_keys)
-    
-    logger.info('')
-    logger.info('─' * 80)
-    logger.info(f'Total Processing Time: {total_time}ms ({total_time/1000:.2f}s)')
-    logger.info(f'Success Rate: {success_count}/{total_models} models succeeded')
-    logger.info('=' * 80)
-    logger.info('')
+
+    logger.info("")
+    logger.info("─" * 80)
+    logger.info(f"Total Processing Time: {total_time}ms ({total_time / 1000:.2f}s)")
+    logger.info(f"Success Rate: {success_count}/{total_models} models succeeded")
+    logger.info("=" * 80)
+    logger.info("")
 
 
 # =============================================================================
@@ -1356,20 +1794,29 @@ def log_chunk_summary(session_id: str, chunk_index: int, results: Dict):
 # 2. Add an entry here mapping model name to:
 #    - 'function': The analysis function to call
 #    - 'data_type': Either 'audio' or 'video' - specifies which bytes to pass to the function
+#    - 'depends_on': List of model names that must complete before this model runs (optional)
 #
 MODEL_REGISTRY = {
-    'whisper': {
-        'function': analyze_audio_whisper,
-        'data_type': 'audio'
+    "whisper": {
+        "function": analyze_audio_whisper,
+        "data_type": "audio",
+        "depends_on": [],  # Independent model
     },
-    'mediapipe': {
-        'function': analyze_video_mediapipe,
-        'data_type': 'video'
+    "mediapipe": {
+        "function": analyze_video_mediapipe,
+        "data_type": "video",
+        "depends_on": [],  # Independent model
     },
-    'vocaltone': {
-        'function': analyze_vocal_tone,
-        'data_type': 'audio'
-    }
+    "vocaltone": {
+        "function": analyze_vocal_tone,
+        "data_type": "audio",
+        "depends_on": [],  # Independent model
+    },
+    "clifton_fusion": {
+        "function": analyze_clifton_fusion,
+        "data_type": "audio",  # Doesn't actually use audio_bytes, but needs a value
+        "depends_on": ["whisper", "vocaltone"],  # Runs after whisper and vocaltone
+    },
 }
 
 
@@ -1379,20 +1826,21 @@ def run_parallel_analysis(
     session_id: str,
     chunk_index: int,
     max_workers: int = None,
-    timeout: int = 60
+    timeout: int = 300,
 ) -> Dict:
     """
-    Run all analysis functions in parallel using ThreadPoolExecutor.
+    Run all analysis functions with dependency support.
 
-    This provides function-level parallelism within a single chunk.
+    Models with dependencies run AFTER their dependencies complete.
+    Independent models run in parallel for optimal performance.
 
     Args:
         video_bytes: MP4 video data
         audio_bytes: WAV audio data
         session_id: Session identifier
         chunk_index: Chunk index within session
-        max_workers: Maximum parallel workers (default: None = auto-scale to model count)
-        timeout: Timeout in seconds per function (default: 60)
+        max_workers: Maximum parallel workers (default: None = auto-scale to independent model count)
+        timeout: Timeout in seconds per function (default: 300 for slow CPU/Windows)
 
     Returns:
         Dictionary with all analysis results:
@@ -1400,64 +1848,136 @@ def run_parallel_analysis(
             'whisper': dict,
             'mediapipe': dict,
             'vocaltone': dict,
+            'clifton_fusion': dict,
             'total_processing_time_ms': int
         }
     """
     overall_start = time.time()
 
-    logger.info(f'Running parallel analysis for chunk {session_id}:{chunk_index}')
+    logger.info(f"Running analysis for chunk {session_id}:{chunk_index}")
 
     results = {}
 
-    # Auto-scale max_workers to match number of models
+    # Phase 1: Identify independent and dependent models
+    independent_models = {}
+    dependent_models = {}
+
+    for model_name, model_config in MODEL_REGISTRY.items():
+        if not model_config.get("depends_on", []):
+            independent_models[model_name] = model_config
+        else:
+            dependent_models[model_name] = model_config
+
+    logger.debug(f"Independent models: {list(independent_models.keys())}")
+    logger.debug(f"Dependent models: {list(dependent_models.keys())}")
+
+    # Phase 2: Run independent models in parallel
     if max_workers is None:
-        max_workers = len(MODEL_REGISTRY)
-        logger.debug(f'Auto-scaled max_workers to {max_workers} (matches model count)')
+        max_workers = len(independent_models)
+        logger.debug(f"Auto-scaled max_workers to {max_workers} (independent models)")
 
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
-        # Dynamically build futures from MODEL_REGISTRY
         futures = {}
-        for model_name, model_config in MODEL_REGISTRY.items():
-            func = model_config['function']
-            data_type = model_config['data_type']
+        for model_name, model_config in independent_models.items():
+            func = model_config["function"]
+            data_type = model_config["data_type"]
 
             # Select the correct data bytes based on model's data_type
-            data_bytes = audio_bytes if data_type == 'audio' else video_bytes
+            data_bytes = audio_bytes if data_type == "audio" else video_bytes
 
-            futures[model_name] = executor.submit(func, data_bytes, session_id, chunk_index)
+            futures[model_name] = executor.submit(
+                func, data_bytes, session_id, chunk_index
+            )
 
-        # Collect results as they complete
+        # Collect independent results
         for name, future in futures.items():
             try:
                 result = future.result(timeout=timeout)
                 results[name] = result
 
                 # Log success or error
-                if 'error' in result:
-                    logger.warning(f'[{name}] Failed for chunk {session_id}:{chunk_index}: {result["error"]}')
+                if "error" in result:
+                    logger.warning(
+                        f"[{name}] Failed for chunk {session_id}:{chunk_index}: {result['error']}"
+                    )
                 else:
-                    logger.debug(f'[{name}] Succeeded for chunk {session_id}:{chunk_index}')
+                    logger.debug(
+                        f"[{name}] Succeeded for chunk {session_id}:{chunk_index}"
+                    )
 
             except TimeoutError:
-                error_msg = f'Timeout after {timeout}s'
-                logger.error(f'[{name}] Timeout for chunk {session_id}:{chunk_index}')
-                results[name] = {'error': error_msg}
+                error_msg = f"Timeout after {timeout}s"
+                logger.error(f"[{name}] Timeout for chunk {session_id}:{chunk_index}")
+                results[name] = {"error": error_msg}
 
             except Exception as e:
-                logger.error(f'[{name}] Exception for chunk {session_id}:{chunk_index}: {e}')
-                results[name] = {'error': str(e)}
+                logger.error(
+                    f"[{name}] Exception for chunk {session_id}:{chunk_index}: {e}"
+                )
+                results[name] = {"error": str(e)}
+
+    # Phase 3: Run dependent models sequentially
+    for model_name, model_config in dependent_models.items():
+        func = model_config["function"]
+        dependencies = model_config.get("depends_on", [])
+
+        # Build dependency dict
+        dep_results = {dep: results.get(dep, {}) for dep in dependencies}
+
+        # Check if all dependencies succeeded
+        missing_deps = [dep for dep in dependencies if dep not in results]
+        failed_deps = [dep for dep in dependencies if "error" in results.get(dep, {})]
+
+        if missing_deps:
+            error_msg = f"Missing dependencies: {missing_deps}"
+            logger.error(f"[{model_name}] {error_msg}")
+            results[model_name] = {"error": error_msg, "processing_time_ms": 0}
+            continue
+
+        if failed_deps:
+            error_msg = f"Failed dependencies: {failed_deps}"
+            logger.warning(f"[{model_name}] {error_msg}")
+            results[model_name] = {"error": error_msg, "processing_time_ms": 0}
+            continue
+
+        try:
+            # Call with dependencies parameter
+            data_type = model_config["data_type"]
+            data_bytes = audio_bytes if data_type == "audio" else video_bytes
+
+            result = func(data_bytes, session_id, chunk_index, dependencies=dep_results)
+            results[model_name] = result
+
+            # Log success or error
+            if "error" in result:
+                logger.warning(
+                    f"[{model_name}] Failed for chunk {session_id}:{chunk_index}: {result['error']}"
+                )
+            else:
+                logger.debug(
+                    f"[{model_name}] Succeeded for chunk {session_id}:{chunk_index}"
+                )
+
+        except Exception as e:
+            logger.error(
+                f"[{model_name}] Exception for chunk {session_id}:{chunk_index}: {e}"
+            )
+            results[model_name] = {"error": str(e), "processing_time_ms": 0}
 
     total_time = int((time.time() - overall_start) * 1000)
-    results['total_processing_time_ms'] = total_time
+    results["total_processing_time_ms"] = total_time
 
     # Calculate success count (exclude total_processing_time_ms which is an int)
-    model_keys = [k for k in results.keys() if k != 'total_processing_time_ms']
-    success_count = sum(1 for k in model_keys 
-                       if isinstance(results[k], dict) and 'error' not in results[k])
+    model_keys = [k for k in results.keys() if k != "total_processing_time_ms"]
+    success_count = sum(
+        1
+        for k in model_keys
+        if isinstance(results[k], dict) and "error" not in results[k]
+    )
     total_models = len(model_keys)
     logger.info(
-        f'Parallel analysis complete for chunk {session_id}:{chunk_index}: '
-        f'{success_count}/{total_models} succeeded in {total_time}ms'
+        f"Parallel analysis complete for chunk {session_id}:{chunk_index}: "
+        f"{success_count}/{total_models} succeeded in {total_time}ms"
     )
 
     # Print formatted summary

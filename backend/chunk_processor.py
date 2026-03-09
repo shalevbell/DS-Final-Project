@@ -9,8 +9,9 @@ import json
 import time
 import threading
 from concurrent.futures import ThreadPoolExecutor
-from typing import Optional, Dict
+from typing import Optional, Dict, Set
 from datetime import datetime
+from collections import defaultdict
 
 import redis
 import eventlet
@@ -85,6 +86,11 @@ class ChunkProcessor:
             'processing_times': []
         }
         self.metrics_lock = threading.Lock()
+
+        # Per-session ordering: only process chunk N+1 after chunk N is done
+        self._session_next_chunk: Dict[str, int] = {}   # session_id -> next chunk index to process (1-based)
+        self._session_pending: Dict[str, Set[int]] = defaultdict(set)  # session_id -> chunk indices waiting
+        self._order_lock = threading.Lock()
 
         logger.info(
             f'ChunkProcessor initialized: workers={max_workers}, '
@@ -187,14 +193,21 @@ class ChunkProcessor:
             audio_kb = data.get("audioSize", 0) // 1024
             logger.info(f'[PUBSUB] Chunk {chunk_index} received - Video: {video_kb}KB, Audio: {audio_kb}KB')
 
-            # Add to queue
-            success = self.queue.add(session_id, chunk_index)
-
-            if success:
-                with self.metrics_lock:
-                    self.metrics['chunks_received'] += 1
-            else:
-                logger.debug(f'Chunk {session_id}:{chunk_index} not added (duplicate or queue full)')
+            # Per-session ordering: only add to queue when this chunk is the next one for this session
+            with self._order_lock:
+                if session_id not in self._session_next_chunk:
+                    self._session_next_chunk[session_id] = 1
+                next_expected = self._session_next_chunk[session_id]
+                if chunk_index == next_expected:
+                    success = self.queue.add(session_id, chunk_index)
+                    if success:
+                        with self.metrics_lock:
+                            self.metrics['chunks_received'] += 1
+                    else:
+                        logger.debug(f'Chunk {session_id}:{chunk_index} not added (duplicate or queue full)')
+                else:
+                    self._session_pending[session_id].add(chunk_index)
+                    logger.debug(f'Chunk {session_id}:{chunk_index} queued for order (waiting for {next_expected})')
 
         except json.JSONDecodeError as e:
             logger.error(f'Failed to parse PUBSUB message: {e}')
@@ -270,6 +283,14 @@ class ChunkProcessor:
         finally:
             # Always mark as complete in queue
             self.queue.mark_complete(session_id, chunk_index)
+            # Release next chunk for this session so it's processed in order
+            with self._order_lock:
+                self._session_next_chunk[session_id] = chunk_index + 1
+                next_c = chunk_index + 1
+                if next_c in self._session_pending.get(session_id, set()):
+                    self._session_pending[session_id].discard(next_c)
+                    self.queue.add(session_id, next_c)
+                    logger.debug(f'Released chunk {session_id}:{next_c} for processing (order)')
 
     def _process_chunk(self, session_id: str, chunk_index: int):
         """
@@ -292,33 +313,53 @@ class ChunkProcessor:
         if video_bytes is None or audio_bytes is None:
             raise ValueError(f'Missing chunk data in Redis for {session_id}:{chunk_index}')
 
-        # 3. Run parallel analysis
-        # RUNS THE MODELS FOR THE CHUNK
-        results = run_parallel_analysis(
-            video_bytes=video_bytes,
-            audio_bytes=audio_bytes,
-            session_id=session_id,
-            chunk_index=chunk_index
-        )
+        # 2b. Start heartbeat so the WebSocket doesn't time out during long processing
+        heartbeat_stop = eventlet.event.Event()
+        def _heartbeat_loop():
+            while not heartbeat_stop.ready():
+                try:
+                    if self.socketio:
+                        self.socketio.emit(
+                            'processing_heartbeat',
+                            {'session_id': session_id, 'chunk_index': chunk_index},
+                            broadcast=True
+                        )
+                except Exception:
+                    pass
+                eventlet.sleep(15)
 
-        # 4. Store results in Redis
-        self._store_results(session_id, chunk_index, results)
+        heartbeat_greenlet = eventlet.spawn(_heartbeat_loop)
+        try:
+            # 3. Run parallel analysis
+            # RUNS THE MODELS FOR THE CHUNK
+            results = run_parallel_analysis(
+                video_bytes=video_bytes,
+                audio_bytes=audio_bytes,
+                session_id=session_id,
+                chunk_index=chunk_index
+            )
 
-        # 5. Update status to 'completed'
-        self._set_status(session_id, chunk_index, 'completed')
+            # 4. Store results in Redis
+            self._store_results(session_id, chunk_index, results)
 
-        # 6. Update metrics
-        processing_time = int((time.time() - start_time) * 1000)
+            # 5. Update status to 'completed'
+            self._set_status(session_id, chunk_index, 'completed')
 
-        with self.metrics_lock:
-            self.metrics['chunks_processed'] += 1
-            self.metrics['processing_times'].append(processing_time)
+            # 6. Update metrics
+            processing_time = int((time.time() - start_time) * 1000)
 
-            # Keep only last 100 processing times
-            if len(self.metrics['processing_times']) > 100:
-                self.metrics['processing_times'] = self.metrics['processing_times'][-100:]
+            with self.metrics_lock:
+                self.metrics['chunks_processed'] += 1
+                self.metrics['processing_times'].append(processing_time)
 
-        logger.info(f'[Processing] Chunk {chunk_index} completed in {processing_time}ms')
+                # Keep only last 100 processing times
+                if len(self.metrics['processing_times']) > 100:
+                    self.metrics['processing_times'] = self.metrics['processing_times'][-100:]
+
+            logger.info(f'[Processing] Chunk {chunk_index} completed in {processing_time}ms')
+        finally:
+            heartbeat_stop.send()
+            heartbeat_greenlet.kill()
 
     def _get_chunk_data(self, session_id: str, chunk_index: int):
         """

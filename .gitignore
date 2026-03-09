@@ -62,6 +62,10 @@ Thumbs.db
 *.pth
 *.onnx
 mediapipe_models/
+backend/clifton_model/models/
+backend/clifton_model/*.zip
+backend/vocal_tone_model/models/
+backend/vocal_tone_model/*.zip
 
 # Data directories
 data/raw/
