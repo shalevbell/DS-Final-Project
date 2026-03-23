@@ -94,6 +94,12 @@ class VideoApp {
         this.clearOutputBtn = document.getElementById('clear-output-btn');
         this.outputContent = document.getElementById('output-content');
         this.modelsStatus = document.getElementById('models-status');
+        this.candidateNameDisplay = document.getElementById('candidate-name-display');
+        this.engagementScore = document.getElementById('engagement-score');
+        this.postureStability = document.getElementById('posture-stability');
+        this.voicePitch = document.getElementById('voice-pitch');
+        this.voiceTempo = document.getElementById('voice-tempo');
+        this.sentimentAlert = document.getElementById('sentiment-alert');
         this.localStream = null;
         this.mediaRecorder = null;
         this.socket = null;
@@ -175,6 +181,7 @@ class VideoApp {
                 console.log(
                     `[ChunkResults] Chunk ${chunkIndex} models: ${Object.keys(results).join(', ')}`
                 );
+                this.updateMetricsFromChunkResults(results);
             } else {
                 console.log('[ChunkResults] Received chunk results', data);
             }
@@ -206,10 +213,17 @@ class VideoApp {
                 // Add placeholder back
                 const placeholder = document.createElement('div');
                 placeholder.className = 'output-placeholder';
-                placeholder.textContent = 'Analysis results will appear here after you start the camera...';
+                placeholder.textContent = 'Interview questions and AI insights will appear here after you start the camera...';
                 this.outputContent.appendChild(placeholder);
             }
         });
+
+        if (this.candidateNameDisplay) {
+            this.candidateNameDisplay.addEventListener('blur', () => {
+                const value = (this.candidateNameDisplay.textContent || '').trim();
+                this.candidateNameDisplay.textContent = value || 'Candidate';
+            });
+        }
     }
 
     async enumerateCameras() {
@@ -415,6 +429,7 @@ class VideoApp {
         this.toggleButton.textContent = 'Start Camera';
         this.toggleButton.classList.remove('btn-danger');
         this.toggleButton.classList.add('btn-primary');
+        this.resetLiveMetrics();
         console.log('Camera stopped');
     }
     
@@ -454,6 +469,9 @@ class VideoApp {
     handleTextStream(data) {
         const { text, timestamp, metadata } = data;
 
+        // Always parse stream text for metric cards, even if this message is not displayed.
+        this.updateInsightWidgets(text, metadata);
+
         // Show only interviewer_ollama questions in the right-hand panel.
         // Other sources (whisper, mediapipe, vocaltone, clifton_fusion, etc.)
         // are kept in logs only.
@@ -479,6 +497,106 @@ class VideoApp {
 
         // Stream the text
         this.textStreamer.addText(text + '\n\n');
+    }
+
+    updateInsightWidgets(text, metadata) {
+        const lowerText = (text || '').toLowerCase();
+        this.tryUpdateMetricsFromText(text);
+
+        if (metadata && typeof metadata.engagement === 'number' && this.engagementScore) {
+            this.engagementScore.textContent = `${Math.max(0, Math.min(100, Math.round(metadata.engagement)))}%`;
+        }
+        if (metadata && typeof metadata.posture === 'number' && this.postureStability) {
+            this.postureStability.textContent = `${Math.max(0, Math.min(100, Math.round(metadata.posture)))}%`;
+        }
+        if (metadata && typeof metadata.pitch_hz === 'number' && this.voicePitch) {
+            this.voicePitch.textContent = `${Math.round(metadata.pitch_hz)} Hz`;
+        }
+        if (metadata && typeof metadata.tempo_bpm === 'number' && this.voiceTempo) {
+            this.voiceTempo.textContent = `${Math.round(metadata.tempo_bpm)} BPM`;
+        }
+
+        if (this.sentimentAlert) {
+            this.sentimentAlert.className = 'alert-chip neutral';
+            this.sentimentAlert.textContent = 'No sentiment alerts';
+
+            if (lowerText.includes('surprise') || lowerText.includes('stress')) {
+                this.sentimentAlert.className = 'alert-chip warning';
+                this.sentimentAlert.textContent = 'Emotion shift detected';
+            }
+            if (lowerText.includes('disgust') || lowerText.includes('anger') || lowerText.includes('frustrat')) {
+                this.sentimentAlert.className = 'alert-chip danger';
+                this.sentimentAlert.textContent = 'Negative sentiment detected';
+            }
+        }
+    }
+
+    updateMetricsFromChunkResults(results) {
+        if (!results || typeof results !== 'object') return;
+
+        const mediapipe = results.mediapipe || {};
+        const vocaltone = results.vocaltone || {};
+
+        if (typeof mediapipe.engagement_score === 'number' && this.engagementScore) {
+            this.engagementScore.textContent = `${Math.round(Math.max(0, Math.min(1, mediapipe.engagement_score)) * 100)}%`;
+        }
+        if (typeof mediapipe.posture_score === 'number' && this.postureStability) {
+            this.postureStability.textContent = `${Math.round(Math.max(0, Math.min(1, mediapipe.posture_score)) * 100)}%`;
+        }
+        if (typeof vocaltone.pitch_mean === 'number' && this.voicePitch) {
+            this.voicePitch.textContent = `${Math.round(vocaltone.pitch_mean)} Hz`;
+        }
+        if (typeof vocaltone.tempo === 'number' && this.voiceTempo) {
+            this.voiceTempo.textContent = `${Math.round(vocaltone.tempo)} BPM`;
+        }
+
+        const emotion = (mediapipe.dominant_emotion || vocaltone.emotion || '').toLowerCase();
+        if (this.sentimentAlert && emotion) {
+            this.sentimentAlert.className = 'alert-chip neutral';
+            this.sentimentAlert.textContent = `Emotion: ${emotion}`;
+
+            if (['surprise', 'fear'].includes(emotion)) {
+                this.sentimentAlert.className = 'alert-chip warning';
+                this.sentimentAlert.textContent = `Watch emotion trend: ${emotion}`;
+            }
+            if (['disgust', 'anger', 'sad'].includes(emotion)) {
+                this.sentimentAlert.className = 'alert-chip danger';
+                this.sentimentAlert.textContent = `Negative emotion detected: ${emotion}`;
+            }
+        }
+    }
+
+    tryUpdateMetricsFromText(text) {
+        if (!text || typeof text !== 'string') return;
+
+        const engagementMatch = text.match(/engagement:\s*(\d+)%/i);
+        const postureMatch = text.match(/posture:\s*(\d+)%/i);
+        const pitchMatch = text.match(/pitch:\s*(\d+(?:\.\d+)?)\s*hz/i);
+        const tempoMatch = text.match(/tempo:\s*(\d+(?:\.\d+)?)\s*bpm/i);
+
+        if (engagementMatch && this.engagementScore) {
+            this.engagementScore.textContent = `${engagementMatch[1]}%`;
+        }
+        if (postureMatch && this.postureStability) {
+            this.postureStability.textContent = `${postureMatch[1]}%`;
+        }
+        if (pitchMatch && this.voicePitch) {
+            this.voicePitch.textContent = `${Math.round(Number(pitchMatch[1]))} Hz`;
+        }
+        if (tempoMatch && this.voiceTempo) {
+            this.voiceTempo.textContent = `${Math.round(Number(tempoMatch[1]))} BPM`;
+        }
+    }
+
+    resetLiveMetrics() {
+        if (this.engagementScore) this.engagementScore.textContent = '--%';
+        if (this.postureStability) this.postureStability.textContent = '--%';
+        if (this.voicePitch) this.voicePitch.textContent = '-';
+        if (this.voiceTempo) this.voiceTempo.textContent = '-';
+        if (this.sentimentAlert) {
+            this.sentimentAlert.className = 'alert-chip neutral';
+            this.sentimentAlert.textContent = 'No sentiment alerts';
+        }
     }
 
     /**
