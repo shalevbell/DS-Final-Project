@@ -342,6 +342,16 @@ class ChunkProcessor:
             # 4. Store results in Redis
             self._store_results(session_id, chunk_index, results)
 
+            # 4b. Persist results to PostgreSQL
+            try:
+                from services.db_service import save_chunk_results
+                save_chunk_results(session_id, chunk_index, results, status='completed')
+            except Exception as e:
+                logger.warning(
+                    f'DB chunk save failed for {session_id}:{chunk_index} '
+                    f'(non-critical, Redis still has results): {e}'
+                )
+
             # 5. Update status to 'completed'
             self._set_status(session_id, chunk_index, 'completed')
 
@@ -453,6 +463,18 @@ class ChunkProcessor:
 
             error_key = get_chunk_error_key(session_id, chunk_index)
             self.redis_data_client.setex(error_key, 3600, json.dumps(error_data))
+
+            # Persist failure record to PostgreSQL
+            try:
+                from services.db_service import save_chunk_results
+                save_chunk_results(
+                    session_id,
+                    chunk_index,
+                    {'error': error_message, 'timestamp': int(time.time())},
+                    status='failed',
+                )
+            except Exception as e:
+                logger.warning(f'DB failed-chunk save failed (non-critical): {e}')
 
             # Update metrics
             with self.metrics_lock:

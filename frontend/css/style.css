@@ -381,3 +381,11 @@ body {
         gap: 8px;
     }
 }
+
+/* Placeholder for contenteditable candidate name */
+#candidate-name-display:empty::before {
+    content: attr(data-placeholder);
+    color: #b0b8c4;
+    font-style: italic;
+    pointer-events: none;
+}

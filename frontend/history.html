@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Helperviewer - Interview History</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="css/style.css?v=6">
+    <link rel="stylesheet" href="css/history.css?v=1">
+</head>
+<body>
+    <div class="app-shell">
+        <main class="dashboard">
+            <header class="topbar">
+                <h1>Helperviewer <span>- Interview History</span></h1>
+                <a href="/" class="btn btn-secondary" style="font-size:12px;padding:6px 14px;text-decoration:none;">Back to Interview</a>
+            </header>
+
+            <div class="panel filter-bar">
+                <input type="text" id="candidate-filter" placeholder="Filter by candidate name..." autocomplete="off">
+                <button id="btn-search" class="btn btn-primary" type="button">Search</button>
+                <button id="btn-clear" class="btn btn-secondary" type="button">Clear</button>
+            </div>
+
+            <div class="panel">
+                <div class="panel-title">Interview Sessions</div>
+                <table id="sessions-table">
+                    <thead>
+                        <tr>
+                            <th>Date &amp; Time</th>
+                            <th>Candidate</th>
+                            <th>Duration</th>
+                            <th>Chunks</th>
+                            <th>Status</th>
+                            <th></th>
+                        </tr>
+                    </thead>
+                    <tbody id="sessions-tbody">
+                        <tr class="skeleton-row"><td><div class="skel"></div></td><td><div class="skel"></div></td><td><div class="skel skel-sm"></div></td><td><div class="skel skel-sm"></div></td><td><div class="skel skel-sm"></div></td><td></td></tr>
+                        <tr class="skeleton-row"><td><div class="skel"></div></td><td><div class="skel"></div></td><td><div class="skel skel-sm"></div></td><td><div class="skel skel-sm"></div></td><td><div class="skel skel-sm"></div></td><td></td></tr>
+                        <tr class="skeleton-row"><td><div class="skel"></div></td><td><div class="skel"></div></td><td><div class="skel skel-sm"></div></td><td><div class="skel skel-sm"></div></td><td><div class="skel skel-sm"></div></td><td></td></tr>
+                        <tr class="skeleton-row"><td><div class="skel"></div></td><td><div class="skel"></div></td><td><div class="skel skel-sm"></div></td><td><div class="skel skel-sm"></div></td><td><div class="skel skel-sm"></div></td><td></td></tr>
+                        <tr class="skeleton-row"><td><div class="skel"></div></td><td><div class="skel"></div></td><td><div class="skel skel-sm"></div></td><td><div class="skel skel-sm"></div></td><td><div class="skel skel-sm"></div></td><td></td></tr>
+                    </tbody>
+                </table>
+                <div class="pagination-controls" id="pagination-controls"></div>
+            </div>
+
+            <div id="session-detail" class="panel hidden">
+                <div class="panel-title">
+                    <span id="detail-title">Session Detail</span>
+                    <button id="btn-close-detail" title="Close">&times;</button>
+                </div>
+                <div id="chunks-container"></div>
+            </div>
+        </main>
+    </div>
+
+    <script src="js/history.js?v=1"></script>
+</body>
+</html>

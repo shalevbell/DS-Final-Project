@@ -125,6 +125,19 @@ class VideoApp {
         this.initializeEventListeners();
         this.enumerateCameras();
         this.startModelStatusCheck();
+
+        // Reliably close the session when navigating away mid-interview
+        window.addEventListener('beforeunload', () => {
+            if (this.isCameraActive && this.sessionId) {
+                // Try socket first (works for same-tab navigation)
+                this.sendWebSocketMessage('stream_ended', { sessionId: this.sessionId });
+                // sendBeacon survives page unload reliably
+                const { protocol, hostname } = window.location;
+                navigator.sendBeacon(
+                    `${protocol}//${hostname}:5555/api/sessions/${encodeURIComponent(this.sessionId)}/complete`
+                );
+            }
+        });
     }
 
     initializeSession() {
@@ -219,10 +232,28 @@ class VideoApp {
         });
 
         if (this.candidateNameDisplay) {
+            this.candidateNameDisplay.addEventListener('input', () => {
+                this._updateStartButtonState();
+            });
             this.candidateNameDisplay.addEventListener('blur', () => {
                 const value = (this.candidateNameDisplay.textContent || '').trim();
-                this.candidateNameDisplay.textContent = value || 'Candidate';
+                this.candidateNameDisplay.textContent = value;
+                this._updateStartButtonState();
             });
+        }
+    }
+
+    _updateStartButtonState() {
+        const name = (this.candidateNameDisplay ? this.candidateNameDisplay.textContent || '' : '').trim();
+        const nameEntered = name.length > 0;
+        const shouldEnable = this.modelsReady && nameEntered;
+        this.toggleButton.disabled = !shouldEnable;
+        if (!this.modelsReady) {
+            // Text managed by updateModelStatusUI — don't override
+        } else if (!nameEntered) {
+            this.toggleButton.textContent = 'Enter candidate name to start';
+        } else if (!this.isCameraActive) {
+            this.toggleButton.textContent = 'Start Camera';
         }
     }
 
@@ -295,8 +326,10 @@ class VideoApp {
             }, 1000);
 
             const tracks = this.localStream.getTracks();
+            const candidateName = (this.candidateNameDisplay ? this.candidateNameDisplay.textContent || '' : '').trim();
             this.sendWebSocketMessage('stream_ready', {
                 sessionId: this.sessionId,
+                candidateName: candidateName,
                 status: 'active',
                 video: tracks.some(t => t.kind === 'video'),
                 audio: tracks.some(t => t.kind === 'audio')
@@ -423,12 +456,17 @@ class VideoApp {
             this.localStream = null;
         }
 
+        // Notify backend the session has ended before clearing sessionId
+        if (this.sessionId) {
+            this.sendWebSocketMessage('stream_ended', { sessionId: this.sessionId });
+        }
+
         this.resetSession();
         this.updateConnectionStatus(false);
         this.isCameraActive = false;
-        this.toggleButton.textContent = 'Start Camera';
         this.toggleButton.classList.remove('btn-danger');
         this.toggleButton.classList.add('btn-primary');
+        this._updateStartButtonState();
         this.resetLiveMetrics();
         console.log('Camera stopped');
     }
@@ -456,9 +494,9 @@ class VideoApp {
         alert(messages[error.name] || `Error: ${error.message || error.name}`);
         this.updateConnectionStatus(false);
         this.isCameraActive = false;
-        this.toggleButton.textContent = 'Start Camera';
         this.toggleButton.classList.remove('btn-danger');
         this.toggleButton.classList.add('btn-primary');
+        this._updateStartButtonState();
         this.sendWebSocketMessage('camera_error', { error: error.name, message: error.message });
     }
 
@@ -714,8 +752,9 @@ class VideoApp {
             statusText.textContent = 'Model status unavailable';
             // Allow camera to work even if status check failed
             if (!anyLoading) {
-                this.toggleButton.disabled = false;
+                this.modelsReady = true;
                 this.toggleButton.textContent = 'Start Camera (Models may load at runtime)';
+                this._updateStartButtonState();
             }
             return;
         }
@@ -724,10 +763,7 @@ class VideoApp {
             this.modelsReady = true;
             this.modelsStatus.className = 'models-status ready';
             statusText.textContent = 'All models ready';
-
-            // Enable camera button when all models are ready
-            this.toggleButton.disabled = false;
-            this.toggleButton.textContent = 'Start Camera';
+            this._updateStartButtonState();
         } else {
             // Check which models are loading
             const loadingModels = [];
@@ -745,26 +781,27 @@ class VideoApp {
 
             this.modelsStatus.className = 'models-status';
 
-            // Only disable camera button while models are actively loading
-            // If loading failed, enable button (models can load at runtime)
-            this.toggleButton.disabled = anyLoading;
-
             // Special handling for Ollama progress
             if (status.ollama && status.ollama.loading && status.ollama.progress !== undefined) {
                 const progress = status.ollama.progress;
                 const statusTextStr = status.ollama.status_text || 'downloading';
                 statusText.textContent = `Downloading Ollama model: ${progress}% (${statusTextStr})`;
                 this.toggleButton.textContent = `Loading Models... ${progress}%`;
+                this.toggleButton.disabled = true;
             } else if (loadingModels.length > 0) {
                 statusText.textContent = `Loading models... (${readyModels.length}/${readyModels.length + loadingModels.length} ready)`;
                 this.toggleButton.textContent = `Loading Models... (${readyModels.length}/${readyModels.length + loadingModels.length})`;
+                this.toggleButton.disabled = true;
             } else if (hasError) {
-                // Models finished loading but some failed - allow camera anyway
+                // Models finished loading but some failed — allow camera anyway
                 statusText.textContent = 'Some models failed to load';
+                this.modelsReady = true;
                 this.toggleButton.textContent = 'Start Camera (Some models unavailable)';
+                this._updateStartButtonState();
             } else {
                 statusText.textContent = 'Initializing models...';
                 this.toggleButton.textContent = 'Start Camera';
+                this.toggleButton.disabled = true;
             }
         }
     }

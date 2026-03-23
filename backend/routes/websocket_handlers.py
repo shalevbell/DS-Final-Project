@@ -8,6 +8,7 @@ import logging
 import time
 import json
 import shutil
+from datetime import datetime, timezone
 from flask_socketio import SocketIO, emit
 import eventlet
 
@@ -15,6 +16,7 @@ from config import Config
 from services.connection_manager import get_redis_client, initialize_chunk_processor, get_chunk_processor
 from services.video_processor import parse_chunk_data, convert_chunk_with_ffmpeg
 from services.chunk_storage import store_chunk_in_redis, notify_chunk_ready
+from services.db_service import save_session, complete_session
 
 logger = logging.getLogger(__name__)
 
@@ -58,7 +60,8 @@ def register_socketio_handlers(socketio: SocketIO, config: Config):
         """Handle stream ready event and initialize storage."""
         if isinstance(data, dict):
             session_id = data.get('sessionId')
-            logger.info(f'Stream ready: {session_id}')
+            candidate_name = (data.get('candidateName') or '').strip() or 'Unknown'
+            logger.info(f'Stream ready: {session_id} (candidate: {candidate_name})')
 
             # Initialize stream storage in Redis
             if session_id:
@@ -67,6 +70,7 @@ def register_socketio_handlers(socketio: SocketIO, config: Config):
                     try:
                         metadata = {
                             'sessionId': session_id,
+                            'candidateName': candidate_name,
                             'startTime': data.get('timestamp', int(time.time())),
                             'video': data.get('video'),
                             'audio': data.get('audio'),
@@ -75,6 +79,18 @@ def register_socketio_handlers(socketio: SocketIO, config: Config):
                         r.setex(f'session:{session_id}:info', 3600, json.dumps(metadata))
                     except Exception as e:
                         logger.error(f'Error storing metadata: {e}')
+
+                # Persist session to PostgreSQL
+                try:
+                    save_session(
+                        session_id=session_id,
+                        candidate_name=candidate_name,
+                        started_at=datetime.now(timezone.utc),
+                        video_enabled=bool(data.get('video', True)),
+                        audio_enabled=bool(data.get('audio', True)),
+                    )
+                except Exception as e:
+                    logger.warning(f'DB save_session failed (non-critical): {e}')
 
             emit('stream_acknowledged', {
                 'status': 'ready',
@@ -161,5 +177,35 @@ def register_socketio_handlers(socketio: SocketIO, config: Config):
             logger.error(f'Chunk data parsing error: {e}')
         except Exception as e:
             logger.error(f'Error processing chunk: {e}')
+
+    @socketio.on('stream_ended')
+    def handle_stream_ended(data):
+        """Handle stream ended event — mark session completed in DB and Redis."""
+        if not isinstance(data, dict):
+            return
+        session_id = data.get('sessionId')
+        if not session_id:
+            return
+
+        logger.info(f'Stream ended: {session_id}')
+
+        # Update Redis session status
+        r = get_redis_client()
+        if r:
+            try:
+                info_key = f'session:{session_id}:info'
+                existing = r.get(info_key)
+                if existing:
+                    meta = json.loads(existing.decode('utf-8') if isinstance(existing, bytes) else existing)
+                    meta['status'] = 'completed'
+                    r.setex(info_key, 3600, json.dumps(meta))
+            except Exception as e:
+                logger.warning(f'Redis session status update failed: {e}')
+
+        # Mark session completed in PostgreSQL
+        try:
+            complete_session(session_id)
+        except Exception as e:
+            logger.warning(f'DB complete_session failed (non-critical): {e}')
 
     logger.info('SocketIO handlers registered')
