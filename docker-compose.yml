@@ -3,7 +3,7 @@ services:
     build:
       context: ./backend
       dockerfile: Dockerfile
-    container_name: Helperviewer_backend
+    container_name: backend
     ports:
       - "5555:5000"
     environment:
@@ -11,6 +11,8 @@ services:
       REDIS_URL: redis://redis:6379/0
       EVENTLET_NO_GREENDNS: "yes"
       FLASK_ENV: development
+      # Ollama interviewer questions service (internal Docker hostname "ollama")
+      OLLAMA_BASE_URL: http://ollama:11434
       # Training mode: Set to "1" to enable dataset download (only needed for model training)
       # Leave at "0" for inference-only mode (saves startup time and bandwidth)
       ENABLE_TRAINING: "0"
@@ -29,15 +31,27 @@ services:
       - dataset_data:/data/dataset
       # Persist Whisper model cache between container restarts
       - whisper_cache:/root/.cache/huggingface
+      # Optional: mount Ollama models volume read-only into backend if needed in future
+      # - ollama_models:/root/.ollama:ro
     depends_on:
       postgres:
         condition: service_healthy
       redis:
         condition: service_healthy
+      ollama:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
     restart: unless-stopped
+    networks:
+      - helperviewer_network
   postgres:
     image: postgres:15-alpine
-    container_name: Helperviewer_postgres
+    container_name: postgres
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
@@ -52,10 +66,13 @@ services:
       timeout: 5s
       retries: 5
     restart: unless-stopped
+    networks:
+      - helperviewer_network
 
   redis:
     image: redis:7-alpine
-    container_name: Helperviewer_redis
+    container_name: redis
+    command: redis-server --appendonly yes --maxmemory 512mb --maxmemory-policy allkeys-lru
     ports:
       - "6379:6379"
     volumes:
@@ -66,9 +83,33 @@ services:
       timeout: 5s
       retries: 5
     restart: unless-stopped
+    networks:
+      - helperviewer_network
+
+  ollama:
+    image: ollama/ollama:latest
+    container_name: ollama
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_models:/root/.ollama
+    restart: unless-stopped
+    networks:
+      - helperviewer_network
+
+networks:
+  helperviewer_network:
+    driver: bridge
+    name: helperviewer_network
 
 volumes:
   postgres_data:
+    name: helperviewer_postgres_data
   redis_data:
+    name: helperviewer_redis_data
   whisper_cache:
+    name: helperviewer_whisper_cache
   dataset_data:
+    name: helperviewer_dataset_data
+  ollama_models:
+    name: helperviewer_ollama_models

@@ -91,4 +91,15 @@ class Config:
     # Clifton Fusion model configuration
     # Threshold below which a domain is considered a development opportunity
     # Default: 0.15 (below 60% of even distribution across 4 domains)
-    CLIFTON_DEVELOPMENT_THRESHOLD = float(os.getenv("CLIFTON_DEVELOPMENT_THRESHOLD", "0.15"))
+    CLIFTON_DEVELOPMENT_THRESHOLD = float(
+        os.getenv("CLIFTON_DEVELOPMENT_THRESHOLD", "0.15")
+    )
+
+    # Ollama interviewer questions model
+    # Base URL of the Ollama server
+    OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://ollama:11434")
+    # Name of the Ollama model to use (e.g. llama3, mistral, phi3:mini, gemma3:270m, etc.)
+    # Default to the very small \"gemma3:270m\" model to fit low-RAM environments.
+    OLLAMA_MODEL_NAME = os.getenv("OLLAMA_MODEL_NAME", "gemma3:1b")
+    # Timeout in seconds for Ollama HTTP requests
+    OLLAMA_TIMEOUT = int(os.getenv("OLLAMA_TIMEOUT", "60"))

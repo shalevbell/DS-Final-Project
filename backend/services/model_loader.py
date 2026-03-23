@@ -9,10 +9,23 @@ import joblib
 from pathlib import Path
 from faster_whisper import WhisperModel
 import mediapipe as mp
+import requests
 
 from config import Config
 
 logger = logging.getLogger(__name__)
+
+# Global variable to track model preload status (accessible by API endpoints)
+_preload_status = {
+    'whisper': {'ready': False, 'loading': False, 'error': None},
+    'mediapipe': {'ready': False, 'loading': False, 'error': None},
+    'vocaltone': {'ready': False, 'loading': False, 'error': None},
+    'ollama': {'ready': False, 'loading': False, 'error': None, 'progress': 0, 'status_text': 'Waiting...'}
+}
+
+def get_preload_status() -> dict:
+    """Get current model preload status for API endpoints."""
+    return _preload_status.copy()
 
 
 def preload_whisper_model() -> bool:
@@ -24,6 +37,7 @@ def preload_whisper_model() -> bool:
     Returns:
         bool: True if successful, False otherwise
     """
+    _preload_status['whisper']['loading'] = True
     try:
         from run_models import analyze_audio_whisper
 
@@ -40,10 +54,14 @@ def preload_whisper_model() -> bool:
         analyze_audio_whisper._model = model
 
         logger.info('[ModelLoader] Whisper model preloaded successfully')
+        _preload_status['whisper']['ready'] = True
+        _preload_status['whisper']['loading'] = False
         return True
 
     except Exception as e:
         logger.error(f'[ModelLoader] Failed to preload Whisper model: {e}', exc_info=True)
+        _preload_status['whisper']['error'] = str(e)
+        _preload_status['whisper']['loading'] = False
         return False
 
 
@@ -57,6 +75,7 @@ def preload_mediapipe_models() -> bool:
     Returns:
         bool: True if successful, False otherwise
     """
+    _preload_status['mediapipe']['loading'] = True
     try:
         from run_models import analyze_video_mediapipe, _download_mediapipe_model
 
@@ -128,10 +147,14 @@ def preload_mediapipe_models() -> bool:
         }
 
         logger.info('[ModelLoader] MediaPipe models preloaded successfully')
+        _preload_status['mediapipe']['ready'] = True
+        _preload_status['mediapipe']['loading'] = False
         return True
 
     except Exception as e:
         logger.error(f'[ModelLoader] Failed to preload MediaPipe models: {e}', exc_info=True)
+        _preload_status['mediapipe']['error'] = str(e)
+        _preload_status['mediapipe']['loading'] = False
         return False
 
 
@@ -145,6 +168,7 @@ def preload_vocaltone_model() -> bool:
     Returns:
         bool: True if successful, False otherwise
     """
+    _preload_status['vocaltone']['loading'] = True
     try:
         from run_models import analyze_vocal_tone
 
@@ -163,6 +187,8 @@ def preload_vocaltone_model() -> bool:
 
         if not model_path.exists():
             logger.warning(f'[ModelLoader] Vocal Tone model not found: {model_path}. Skipping preload.')
+            _preload_status['vocaltone']['error'] = 'Model files not found'
+            _preload_status['vocaltone']['loading'] = False
             return False
 
         # Load model files
@@ -176,10 +202,136 @@ def preload_vocaltone_model() -> bool:
         analyze_vocal_tone._labels_map = labels_map
 
         logger.info(f'[ModelLoader] VocalTone model preloaded: {type(model).__name__}, {len(labels_map)} classes')
+        _preload_status['vocaltone']['ready'] = True
+        _preload_status['vocaltone']['loading'] = False
         return True
 
     except Exception as e:
         logger.error(f'[ModelLoader] Failed to preload VocalTone model: {e}', exc_info=True)
+        _preload_status['vocaltone']['error'] = str(e)
+        _preload_status['vocaltone']['loading'] = False
+        return False
+
+
+def preload_ollama_model() -> bool:
+    """
+    Preload Ollama model by pulling it from Ollama registry.
+
+    Ensures model is available before first chunk processing.
+    Uses Ollama API to check if model exists, pulls if needed.
+
+    Returns:
+        bool: True if successful (model ready), False otherwise
+    """
+    _preload_status['ollama']['loading'] = True
+    try:
+        base_url = Config.OLLAMA_BASE_URL.rstrip("/")
+        model_name = Config.OLLAMA_MODEL_NAME
+
+        logger.info(f'[ModelLoader] Checking Ollama model: "{model_name}"')
+
+        # Check if model exists (list local models)
+        try:
+            response = requests.get(
+                f"{base_url}/api/tags",
+                timeout=10
+            )
+            response.raise_for_status()
+            data = response.json()
+
+            # Check if model is in local models list
+            models = data.get("models", [])
+            model_exists = any(
+                model.get("name", "").startswith(model_name)
+                for model in models
+            )
+
+            if model_exists:
+                logger.info(f'[ModelLoader] Ollama model "{model_name}" already downloaded')
+                _preload_status['ollama']['ready'] = True
+                _preload_status['ollama']['loading'] = False
+                return True
+
+        except Exception as check_err:
+            logger.warning(f'[ModelLoader] Could not check Ollama models: {check_err}')
+
+        # Pull model if not found
+        logger.info(f'[ModelLoader] Pulling Ollama model "{model_name}" (this may take several minutes)...')
+
+        response = requests.post(
+            f"{base_url}/api/pull",
+            json={"name": model_name, "stream": True},
+            timeout=600,  # 10 minutes timeout for model download
+            stream=True
+        )
+        response.raise_for_status()
+
+        # Process streaming response for progress updates
+        import json
+        total_size = 0
+        downloaded_size = 0
+        last_status = ""
+        last_logged_pct = -1
+
+        for line in response.iter_lines():
+            if line:
+                try:
+                    data = json.loads(line)
+
+                    # Check for errors first
+                    if "error" in data:
+                        error_msg = data["error"]
+                        logger.error(f'[ModelLoader] Ollama pull failed: {error_msg}')
+                        _preload_status['ollama']['error'] = error_msg
+                        _preload_status['ollama']['loading'] = False
+                        _preload_status['ollama']['ready'] = False
+                        return False
+
+                    status = data.get("status", "")
+
+                    # Update progress for download status
+                    if "total" in data and "completed" in data:
+                        total_size = data["total"]
+                        downloaded_size = data["completed"]
+                        progress_pct = int((downloaded_size / total_size * 100)) if total_size > 0 else 0
+
+                        # Always update status (for frontend polling)
+                        _preload_status['ollama']['progress'] = progress_pct
+                        _preload_status['ollama']['status_text'] = status  # Don't include % here - frontend will show it
+
+                        # Log progress every 10% (avoid spam)
+                        if progress_pct // 10 != last_logged_pct // 10:
+                            logger.info(f'[ModelLoader] Ollama pull progress: {progress_pct}% ({downloaded_size}/{total_size} bytes)')
+                            last_logged_pct = progress_pct
+                    elif status and status != last_status:
+                        logger.info(f'[ModelLoader] Ollama: {status}')
+                        _preload_status['ollama']['status_text'] = status
+                        last_status = status
+
+                except json.JSONDecodeError:
+                    continue
+
+        logger.info(f'[ModelLoader] Ollama model "{model_name}" pulled successfully')
+        _preload_status['ollama']['ready'] = True
+        _preload_status['ollama']['loading'] = False
+        _preload_status['ollama']['progress'] = 100
+        _preload_status['ollama']['status_text'] = 'Ready'
+        return True
+
+    except requests.exceptions.ConnectionError as e:
+        logger.error(f'[ModelLoader] Cannot connect to Ollama service at {Config.OLLAMA_BASE_URL}: {e}')
+        _preload_status['ollama']['error'] = f'Cannot connect to Ollama service: {e}'
+        _preload_status['ollama']['loading'] = False
+        return False
+    except requests.exceptions.Timeout:
+        logger.error('[ModelLoader] Ollama model pull timed out (>10 minutes)')
+        _preload_status['ollama']['error'] = 'Model pull timed out'
+        _preload_status['ollama']['loading'] = False
+        return False
+    except Exception as e:
+        logger.error(f'[ModelLoader] Failed to preload Ollama model: {e}', exc_info=True)
+        _preload_status['ollama']['error'] = str(e)
+        _preload_status['ollama']['loading'] = False
         return False
 
 
@@ -194,7 +346,7 @@ def preload_all_models() -> dict:
     Lazy loading fallbacks remain as safety net.
 
     Returns:
-        dict: Status of each model {'whisper': bool, 'mediapipe': bool, 'vocaltone': bool}
+        dict: Status of each model {'whisper': bool, 'mediapipe': bool, 'vocaltone': bool, 'ollama': bool}
     """
     logger.info('=' * 56)
     logger.info('[ModelLoader] Starting model preloading...')
@@ -203,7 +355,8 @@ def preload_all_models() -> dict:
     status = {
         'whisper': preload_whisper_model(),
         'mediapipe': preload_mediapipe_models(),
-        'vocaltone': preload_vocaltone_model()
+        'vocaltone': preload_vocaltone_model(),
+        'ollama': preload_ollama_model()
     }
 
     # Summary logging

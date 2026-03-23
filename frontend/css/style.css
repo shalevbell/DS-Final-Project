@@ -26,12 +26,63 @@ body {
     border-radius: 10px;
     margin-bottom: 20px;
     box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+    position: relative;
 }
 
 .header h1 {
     font-size: 28px;
     font-weight: 600;
     text-align: center;
+}
+
+/* Models Status Indicator */
+.models-status {
+    position: absolute;
+    top: 20px;
+    right: 30px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    background-color: rgba(255, 255, 255, 0.15);
+    padding: 8px 14px;
+    border-radius: 20px;
+    font-size: 13px;
+    font-weight: 500;
+    backdrop-filter: blur(10px);
+    transition: all 0.3s ease;
+}
+
+.models-status .status-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background-color: #fbbf24;
+    animation: loading-pulse 1.5s infinite;
+}
+
+.models-status.ready .status-dot {
+    background-color: #10b981;
+    animation: none;
+}
+
+.models-status.error .status-dot {
+    background-color: #ef4444;
+    animation: none;
+}
+
+.models-status .status-text {
+    color: white;
+}
+
+@keyframes loading-pulse {
+    0%, 100% {
+        opacity: 1;
+        transform: scale(1);
+    }
+    50% {
+        opacity: 0.5;
+        transform: scale(0.9);
+    }
 }
 
 /* Main Content Layout */
@@ -386,8 +437,19 @@ body {
         padding: 20px;
     }
 
+    .header {
+        padding: 15px 20px;
+    }
+
     .header h1 {
         font-size: 22px;
+    }
+
+    .models-status {
+        position: static;
+        margin-top: 10px;
+        justify-content: center;
+        font-size: 12px;
     }
 
     .output-window {
