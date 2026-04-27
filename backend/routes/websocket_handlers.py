@@ -61,6 +61,8 @@ def register_socketio_handlers(socketio: SocketIO, config: Config):
         if isinstance(data, dict):
             session_id = data.get('sessionId')
             candidate_name = (data.get('candidateName') or '').strip() or 'Unknown'
+            target_role = (data.get('targetRole') or '').strip()
+            interview_requirements = (data.get('interviewRequirements') or '').strip()
             logger.info(f'Stream ready: {session_id} (candidate: {candidate_name})')
 
             # Initialize stream storage in Redis
@@ -71,6 +73,8 @@ def register_socketio_handlers(socketio: SocketIO, config: Config):
                         metadata = {
                             'sessionId': session_id,
                             'candidateName': candidate_name,
+                            'targetRole': target_role,
+                            'interviewRequirements': interview_requirements,
                             'startTime': data.get('timestamp', int(time.time())),
                             'video': data.get('video'),
                             'audio': data.get('audio'),

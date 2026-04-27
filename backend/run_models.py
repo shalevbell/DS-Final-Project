@@ -14,6 +14,7 @@ from collections import Counter
 from pathlib import Path
 from typing import Dict, List, Optional
 from concurrent.futures import ThreadPoolExecutor
+import json
 import re
 
 import cv2
@@ -1728,6 +1729,24 @@ def analyze_interviewer_questions_ollama(
             f"- Areas for development: {', '.join(development_opportunities) if development_opportunities else 'none identified'}\n"
         )
 
+        # Fetch optional interview context (role, requirements) stored in Redis at session start
+        _interview_context = ""
+        try:
+            from services.connection_manager import get_redis_client
+            _r = get_redis_client()
+            if _r:
+                _raw = _r.get(f'session:{session_id}:info')
+                if _raw:
+                    _meta = json.loads(_raw.decode() if isinstance(_raw, bytes) else _raw)
+                    _role = (_meta.get('targetRole') or '').strip()
+                    _reqs = (_meta.get('interviewRequirements') or '').strip()
+                    if _role:
+                        _interview_context += f"- Target role: {_role}\n"
+                    if _reqs:
+                        _interview_context += f"- What the interviewer is looking for: {_reqs}\n"
+        except Exception:
+            pass  # Non-critical; degrade gracefully if Redis unavailable
+
         system_prompt = (
             "You are assisting a job interviewer. A candidate just answered a question on video.\n\n"
             "YOUR TASK:\n"
@@ -1756,6 +1775,14 @@ def analyze_interviewer_questions_ollama(
             "3. How would you handle a situation?\n"
             "(BAD because: #1 treats candidate as interviewer, #2 & #3 are too generic and don't reference what they said)"
         )
+
+        if _interview_context:
+            system_prompt += (
+                "\n\nINTERVIEW CONTEXT (secondary — steer relevance, do not replace behavioral insights):\n"
+                f"{_interview_context}"
+                "PRIORITY: Let what the candidate SAID and HOW they said it drive question substance first. "
+                "Then frame those questions to be relevant to the role and qualities listed above."
+            )
 
         user_prompt = (
             "The candidate just gave this response. Generate 3 follow-up questions for the interviewer to ask the candidate. "

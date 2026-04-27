@@ -95,6 +95,9 @@ class VideoApp {
         this.outputContent = document.getElementById('output-content');
         this.modelsStatus = document.getElementById('models-status');
         this.candidateNameDisplay = document.getElementById('candidate-name-display');
+        this.targetRoleInput = document.getElementById('target-role');
+        this.interviewRequirementsInput = document.getElementById('interview-requirements');
+        this.reqCharCount = document.getElementById('req-char-count');
         this.engagementScore = document.getElementById('engagement-score');
         this.postureStability = document.getElementById('posture-stability');
         this.voicePitch = document.getElementById('voice-pitch');
@@ -241,6 +244,16 @@ class VideoApp {
                 this._updateStartButtonState();
             });
         }
+
+        if (this.interviewRequirementsInput && this.reqCharCount) {
+            const updateCounter = () => {
+                const len = this.interviewRequirementsInput.value.length;
+                this.reqCharCount.textContent = len;
+                const counter = this.reqCharCount.closest('.req-counter');
+                if (counter) counter.classList.toggle('at-limit', len >= 100);
+            };
+            this.interviewRequirementsInput.addEventListener('input', updateCounter);
+        }
     }
 
     _updateStartButtonState() {
@@ -327,9 +340,17 @@ class VideoApp {
 
             const tracks = this.localStream.getTracks();
             const candidateName = (this.candidateNameDisplay ? this.candidateNameDisplay.textContent || '' : '').trim();
+            const targetRole = (this.targetRoleInput ? this.targetRoleInput.value.trim() : '');
+            const interviewRequirements = (this.interviewRequirementsInput ? this.interviewRequirementsInput.value.trim() : '');
+
+            if (this.targetRoleInput) this.targetRoleInput.disabled = true;
+            if (this.interviewRequirementsInput) this.interviewRequirementsInput.disabled = true;
+
             this.sendWebSocketMessage('stream_ready', {
                 sessionId: this.sessionId,
                 candidateName: candidateName,
+                targetRole: targetRole,
+                interviewRequirements: interviewRequirements,
                 status: 'active',
                 video: tracks.some(t => t.kind === 'video'),
                 audio: tracks.some(t => t.kind === 'audio')
@@ -468,6 +489,8 @@ class VideoApp {
         this.toggleButton.classList.add('btn-primary');
         this._updateStartButtonState();
         this.resetLiveMetrics();
+        if (this.targetRoleInput) this.targetRoleInput.disabled = false;
+        if (this.interviewRequirementsInput) this.interviewRequirementsInput.disabled = false;
         console.log('Camera stopped');
     }
     

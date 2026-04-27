@@ -4,10 +4,12 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Helperviewer - AI Interview Assistant</title>
+    <link rel="icon" type="image/png" sizes="32x32" href="/frontend/favicon-32.png">
+    <link rel="icon" type="image/png" sizes="64x64" href="/frontend/favicon-64.png">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="css/style.css?v=6">
+    <link rel="stylesheet" href="css/style.css?v=7">
 </head>
 <body>
     <div class="app-shell">
@@ -48,6 +50,18 @@
                             </select>
                         </div>
 
+                        <div class="session-setup">
+                            <div class="setup-row">
+                                <label for="target-role">Target Role <span class="field-optional">(optional)</span></label>
+                                <input type="text" id="target-role" class="setup-input" placeholder="e.g. Software Engineer" maxlength="100" autocomplete="off">
+                            </div>
+                            <div class="setup-row">
+                                <label for="interview-requirements">What you're looking for <span class="field-optional">(optional)</span></label>
+                                <textarea id="interview-requirements" class="setup-textarea" placeholder="e.g. Looking for a leader who can work well with others..." maxlength="100" rows="2"></textarea>
+                                <div class="req-counter"><span id="req-char-count">0</span>/100</div>
+                            </div>
+                        </div>
+
                         <div id="permission-info" class="permission-info hidden">
                             <p class="info-text">
                                 <strong>Permission Tip:</strong> If camera prompt does not show, reset browser site camera/microphone permissions.
@@ -72,7 +86,7 @@
                         </div>
 
                         <div class="sub-panel">
-                            <h3>Live Transcription</h3>
+                            <h3>Live Question Generation</h3>
                             <div class="output-content" id="output-content">
                                 <div class="output-placeholder">
                                     Interview questions and AI insights will appear here after you start the camera...
@@ -94,6 +108,6 @@
     </div>
 
     <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
-    <script src="js/app.js?v=6"></script>
+    <script src="js/app.js?v=7"></script>
 </body>
 </html>
