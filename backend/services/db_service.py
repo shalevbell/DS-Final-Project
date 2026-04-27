@@ -291,3 +291,40 @@ def get_chunk_detail(session_id: str, chunk_index: int) -> Optional[Dict]:
     except Exception as e:
         logger.warning(f'[DB] get_chunk_detail failed for {session_id}:{chunk_index}: {e}')
         return None
+
+
+def delete_session(session_id: str) -> bool:
+    """
+    Delete a session and all its chunk results (cascades via FK).
+
+    Returns:
+        True on success, False on error
+    """
+    try:
+        with _get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute('DELETE FROM sessions WHERE session_id = %s', (session_id,))
+        return True
+    except Exception as e:
+        logger.warning(f'[DB] delete_session failed for {session_id}: {e}')
+        return False
+
+
+def rename_session(session_id: str, candidate_name: str) -> bool:
+    """
+    Update the candidate name for a session.
+
+    Returns:
+        True on success, False on error
+    """
+    try:
+        with _get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    'UPDATE sessions SET candidate_name = %s WHERE session_id = %s',
+                    (candidate_name, session_id),
+                )
+        return True
+    except Exception as e:
+        logger.warning(f'[DB] rename_session failed for {session_id}: {e}')
+        return False

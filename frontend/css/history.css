@@ -214,6 +214,39 @@
     font-style: italic;
 }
 
+.btn-danger {
+    background: #e74c3c;
+    color: #fff;
+    border: 1px solid #c0392b;
+}
+
+.btn-danger:hover {
+    background: #c0392b;
+    border-color: #a93226;
+}
+
+.actions-cell {
+    display: flex;
+    gap: 6px;
+    align-items: center;
+    white-space: nowrap;
+}
+
+.rename-input {
+    font-size: 12px;
+    padding: 3px 7px;
+    border: 1px solid #ef8a4f;
+    border-radius: 6px;
+    font-family: inherit;
+    color: #3e4a59;
+    outline: none;
+    width: 140px;
+}
+
+.rename-input:focus {
+    box-shadow: 0 0 0 2px rgba(239,138,79,0.25);
+}
+
 /* Skeleton loading rows */
 .skel {
     height: 14px;

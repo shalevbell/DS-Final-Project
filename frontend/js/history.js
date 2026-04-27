@@ -12,12 +12,16 @@ class HistoryApp {
         this.detailTitle = document.getElementById('detail-title');
         this.chunksContainer = document.getElementById('chunks-container');
         this.btnCloseDetail = document.getElementById('btn-close-detail');
+        this.btnRenameDetail = document.getElementById('btn-rename-detail');
 
         this.limit = 20;
         this.offset = 0;
         this.total = 0;
         this.currentCandidate = '';
         this.selectedRow = null;
+        this.currentDetailSessionId = null;
+        this.currentDetailCandidateName = null;
+        this.currentDetailStartedAt = null;
 
         const { protocol, hostname } = window.location;
         this.apiBase = `${protocol}//${hostname}:5555`;
@@ -40,7 +44,9 @@ class HistoryApp {
                 this.selectedRow.classList.remove('selected');
                 this.selectedRow = null;
             }
+            this.currentDetailSessionId = null;
         });
+        this.btnRenameDetail.addEventListener('click', () => this._startDetailRename());
     }
 
     _search() {
@@ -94,16 +100,28 @@ class HistoryApp {
 
             tr.innerHTML = `
                 <td>${dateStr}</td>
-                <td>${this._esc(session.candidate_name)}</td>
+                <td class="candidate-cell">${this._esc(session.candidate_name)}</td>
                 <td>${duration}</td>
                 <td>${session.chunk_count != null ? session.chunk_count : '-'}</td>
                 <td>${statusBadge}</td>
-                <td><button class="btn btn-secondary btn-view" style="font-size:12px;padding:4px 12px;" type="button">View</button></td>
+                <td>
+                    <div class="actions-cell">
+                        <button class="btn btn-secondary btn-view" style="font-size:12px;padding:4px 10px;" type="button">View</button>
+                        <button class="btn btn-secondary btn-rename" style="font-size:12px;padding:4px 10px;" type="button">Rename</button>
+                        <button class="btn btn-danger btn-delete" style="font-size:12px;padding:4px 10px;" type="button">Delete</button>
+                    </div>
+                </td>
             `;
 
             tr.querySelector('.btn-view').addEventListener('click', () => {
                 this._selectRow(tr);
                 this.loadSessionDetail(session.session_id, session.candidate_name, session.started_at);
+            });
+            tr.querySelector('.btn-rename').addEventListener('click', () => {
+                this._startInlineRename(tr, session);
+            });
+            tr.querySelector('.btn-delete').addEventListener('click', () => {
+                this._confirmDeleteSession(session.session_id, session.candidate_name);
             });
 
             this.sessionsTbody.appendChild(tr);
@@ -153,6 +171,9 @@ class HistoryApp {
     }
 
     async loadSessionDetail(sessionId, candidateName, startedAt) {
+        this.currentDetailSessionId = sessionId;
+        this.currentDetailCandidateName = candidateName;
+        this.currentDetailStartedAt = startedAt;
         const date = startedAt ? new Date(startedAt).toLocaleString() : '';
         this.detailTitle.textContent = `${this._esc(candidateName)} — ${date}`;
         this.chunksContainer.innerHTML = '<div style="padding:16px;color:#7b8fa6;">Loading chunks...</div>';
@@ -295,6 +316,126 @@ class HistoryApp {
                     .slice(0, 6)
                     .map(([k, v]) => `<div>${this._esc(k)}: <strong>${this._esc(String(v))}</strong></div>`)
                     .join('') || '<div>No displayable data</div>';
+        }
+    }
+
+    _startInlineRename(tr, session) {
+        const cell = tr.querySelector('.candidate-cell');
+        const orig = session.candidate_name;
+        cell.innerHTML = `
+            <input class="rename-input" type="text" value="${this._esc(orig)}" maxlength="255">
+            <button class="btn btn-primary" style="font-size:11px;padding:3px 8px;" type="button">Save</button>
+            <button class="btn btn-secondary" style="font-size:11px;padding:3px 8px;" type="button">Cancel</button>
+        `;
+        const input = cell.querySelector('.rename-input');
+        const [saveBtn, cancelBtn] = cell.querySelectorAll('button');
+        input.focus();
+        input.select();
+        saveBtn.addEventListener('click', () => this._saveRename(tr, session, input.value.trim()));
+        cancelBtn.addEventListener('click', () => { cell.textContent = orig; });
+        input.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') this._saveRename(tr, session, input.value.trim());
+            if (e.key === 'Escape') { cell.textContent = orig; }
+        });
+    }
+
+    async _saveRename(tr, session, newName) {
+        if (!newName) return;
+        try {
+            const resp = await fetch(
+                `${this.apiBase}/api/history/sessions/${encodeURIComponent(session.session_id)}`,
+                {
+                    method: 'PATCH',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ candidate_name: newName }),
+                }
+            );
+            if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+            session.candidate_name = newName;
+            tr.querySelector('.candidate-cell').textContent = newName;
+            if (this.currentDetailSessionId === session.session_id) {
+                this.currentDetailCandidateName = newName;
+                const date = session.started_at ? new Date(session.started_at).toLocaleString() : '';
+                this.detailTitle.textContent = `${newName} — ${date}`;
+            }
+        } catch (err) {
+            alert(`Rename failed: ${err.message}`);
+            tr.querySelector('.candidate-cell').textContent = session.candidate_name;
+        }
+    }
+
+    async _confirmDeleteSession(sessionId, candidateName) {
+        if (!window.confirm(`Delete session for "${candidateName}"?\n\nThis will permanently remove all chunk results and cannot be undone.`)) return;
+        try {
+            const resp = await fetch(
+                `${this.apiBase}/api/history/sessions/${encodeURIComponent(sessionId)}`,
+                { method: 'DELETE' }
+            );
+            if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+            if (this.currentDetailSessionId === sessionId) {
+                this.sessionDetail.classList.add('hidden');
+                this.currentDetailSessionId = null;
+                if (this.selectedRow) {
+                    this.selectedRow.classList.remove('selected');
+                    this.selectedRow = null;
+                }
+            }
+            if (this.offset > 0 && this.total - 1 <= this.offset) {
+                this.offset = Math.max(0, this.offset - this.limit);
+            }
+            this.fetchSessions();
+        } catch (err) {
+            alert(`Delete failed: ${err.message}`);
+        }
+    }
+
+    _startDetailRename() {
+        if (!this.currentDetailSessionId) return;
+        const orig = this.currentDetailCandidateName || '';
+        this.detailTitle.innerHTML = `
+            <input class="rename-input" type="text" value="${this._esc(orig)}" maxlength="255">
+            <button class="btn btn-primary" style="font-size:11px;padding:3px 8px;" type="button">Save</button>
+            <button class="btn btn-secondary" style="font-size:11px;padding:3px 8px;" type="button">Cancel</button>
+        `;
+        const input = this.detailTitle.querySelector('.rename-input');
+        const [saveBtn, cancelBtn] = this.detailTitle.querySelectorAll('button');
+        input.focus();
+        input.select();
+        const restore = () => {
+            const date = this.currentDetailStartedAt ? new Date(this.currentDetailStartedAt).toLocaleString() : '';
+            this.detailTitle.textContent = `${orig} — ${date}`;
+        };
+        saveBtn.addEventListener('click', () => this._saveDetailRename(input.value.trim(), orig));
+        cancelBtn.addEventListener('click', restore);
+        input.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') this._saveDetailRename(input.value.trim(), orig);
+            if (e.key === 'Escape') restore();
+        });
+    }
+
+    async _saveDetailRename(newName, orig) {
+        if (!newName || !this.currentDetailSessionId) return;
+        try {
+            const resp = await fetch(
+                `${this.apiBase}/api/history/sessions/${encodeURIComponent(this.currentDetailSessionId)}`,
+                {
+                    method: 'PATCH',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ candidate_name: newName }),
+                }
+            );
+            if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+            this.currentDetailCandidateName = newName;
+            const date = this.currentDetailStartedAt ? new Date(this.currentDetailStartedAt).toLocaleString() : '';
+            this.detailTitle.textContent = `${newName} — ${date}`;
+            if (this.selectedRow) {
+                const cell = this.selectedRow.querySelector('.candidate-cell');
+                if (cell && !cell.querySelector('input')) cell.textContent = newName;
+            }
+        } catch (err) {
+            alert(`Rename failed: ${err.message}`);
+            const date = this.currentDetailStartedAt ? new Date(this.currentDetailStartedAt).toLocaleString() : '';
+            this.detailTitle.textContent = `${orig} — ${date}`;
         }
     }
 

@@ -8,7 +8,7 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="css/style.css?v=6">
-    <link rel="stylesheet" href="css/history.css?v=1">
+    <link rel="stylesheet" href="css/history.css?v=2">
 </head>
 <body>
     <div class="app-shell">
@@ -34,7 +34,7 @@
                             <th>Duration</th>
                             <th>Chunks</th>
                             <th>Status</th>
-                            <th></th>
+                            <th>Actions</th>
                         </tr>
                     </thead>
                     <tbody id="sessions-tbody">
@@ -51,13 +51,16 @@
             <div id="session-detail" class="panel hidden">
                 <div class="panel-title">
                     <span id="detail-title">Session Detail</span>
-                    <button id="btn-close-detail" title="Close">&times;</button>
+                    <div style="display:flex;align-items:center;gap:8px;">
+                        <button id="btn-rename-detail" class="btn btn-secondary" style="font-size:12px;padding:4px 12px;" type="button">Rename</button>
+                        <button id="btn-close-detail" title="Close">&times;</button>
+                    </div>
                 </div>
                 <div id="chunks-container"></div>
             </div>
         </main>
     </div>
 
-    <script src="js/history.js?v=1"></script>
+    <script src="js/history.js?v=2"></script>
 </body>
 </html>

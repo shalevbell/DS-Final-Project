@@ -9,7 +9,7 @@ from flask import Flask, jsonify, request, send_from_directory
 from chunk_processor import ChunkProcessor
 from services.connection_manager import check_postgres_health, check_redis_health
 from services.model_loader import get_preload_status
-from services.db_service import list_sessions, get_session_with_chunks, get_chunk_detail
+from services.db_service import list_sessions, get_session_with_chunks, get_chunk_detail, delete_session, rename_session
 from run_models import list_savee_dataset_files
 
 logger = logging.getLogger(__name__)
@@ -156,6 +156,26 @@ def register_http_routes(app: Flask, chunk_processor: ChunkProcessor, frontend_d
         if chunk is None:
             return jsonify({'error': 'Chunk not found'}), 404
         return jsonify({'chunk': _serialize_row(chunk)}), 200
+
+    @app.route('/api/history/sessions/<session_id>', methods=['DELETE'])
+    def delete_session_endpoint(session_id):
+        """Delete a session and all its chunk results."""
+        ok = delete_session(session_id)
+        if not ok:
+            return jsonify({'error': 'Failed to delete session'}), 500
+        return '', 204
+
+    @app.route('/api/history/sessions/<session_id>', methods=['PATCH'])
+    def rename_session_endpoint(session_id):
+        """Rename the candidate for a session."""
+        body = request.get_json(silent=True) or {}
+        candidate_name = (body.get('candidate_name') or '').strip()
+        if not candidate_name:
+            return jsonify({'error': 'candidate_name is required'}), 400
+        ok = rename_session(session_id, candidate_name)
+        if not ok:
+            return jsonify({'error': 'Failed to rename session'}), 500
+        return jsonify({'session_id': session_id, 'candidate_name': candidate_name}), 200
 
     @app.route('/api/sessions/<session_id>/complete', methods=['POST'])
     def complete_session_endpoint(session_id):
