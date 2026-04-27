@@ -1745,7 +1745,7 @@ def analyze_interviewer_questions_ollama(
             "- Each question MUST end with '?'\n"
             "- Each question MUST address the candidate directly\n"
             "- NO introductions, explanations, or acknowledgments\n"
-            "- If you write ANYTHING besides the 3 questions, you FAIL\n\n"
+            "- If you write ANYTHING besides the 3 questions they interviewer should ask the person interviewing, you FAIL\n\n"
             "GOOD EXAMPLES (candidate discussed encryption/lava lamps):\n"
             "1. You mentioned CloudFlare uses lava lamps for random number generation - can you explain how you would implement a similar system for a different use case?\n"
             "2. What challenges do you think arise when trying to achieve true randomness in computer systems?\n"
@@ -1773,6 +1773,11 @@ def analyze_interviewer_questions_ollama(
                 {"role": "user", "content": user_prompt},
             ],
             "stream": False,
+            "options": {
+                "temperature": 0.3,
+                "num_predict": 300,
+                "stop": ["\n\n\n", "4."],
+            },
         }
 
         logger.info(
@@ -1811,6 +1816,11 @@ def analyze_interviewer_questions_ollama(
                 "model": model_name,
                 "prompt": system_prompt + "\n\n" + user_prompt,
                 "stream": False,
+                "options": {
+                    "temperature": 0.3,
+                    "num_predict": 300,
+                    "stop": ["\n\n\n", "4."],
+                },
             }
 
             response = requests.post(
@@ -1840,17 +1850,15 @@ def analyze_interviewer_questions_ollama(
                 stripped = stripped[2:].strip()
             questions.append(stripped)
             if len(questions) >= 8:
-                # collect a few more than needed, we will filter below
                 break
 
         # Keep only lines that look like real questions (contain a '?')
         questions = [q for q in questions if "?" in q]
 
         if len(questions) == 0:
-            # Fallback: extract sentences ending with '?' from full text
-            sentence_candidates = re.findall(r"[^?]*\\?", raw_text)
-            cleaned = [s.strip() for s in sentence_candidates if s.strip().endswith("?")]
-            questions = cleaned or [raw_text.strip()]
+            # Fallback: extract any sentence containing '?' from the raw response
+            sentence_candidates = re.findall(r"[^.!?\n]+\?", raw_text)
+            questions = [s.strip() for s in sentence_candidates if s.strip()]
 
         # Enforce at most 3
         if len(questions) > 3:
@@ -1864,23 +1872,29 @@ def analyze_interviewer_questions_ollama(
             "processing_time_ms": processing_time,
         }
 
-        # Stream questions to frontend for interviewer
-        try:
-            from services.text_streaming import stream_text
-            from app import socketio
+        # Only stream when we actually have valid questions
+        if questions:
+            try:
+                from services.text_streaming import stream_text
+                from app import socketio
 
-            pretty_questions = "\n".join(
-                [f"{i + 1}. {q}" for i, q in enumerate(questions)]
-            )
-            stream_text(
-                socketio,
-                pretty_questions,
-                session_id,
-                {"source": "interviewer_ollama", "chunk": chunk_index},
-            )
-        except Exception as stream_err:
+                pretty_questions = "\n".join(
+                    [f"{i + 1}. {q}" for i, q in enumerate(questions)]
+                )
+                stream_text(
+                    socketio,
+                    pretty_questions,
+                    session_id,
+                    {"source": "interviewer_ollama", "chunk": chunk_index},
+                )
+            except Exception as stream_err:
+                logger.warning(
+                    f"[OllamaInterviewer] Failed to stream questions: {stream_err}"
+                )
+        else:
             logger.warning(
-                f"[OllamaInterviewer] Failed to stream questions: {stream_err}"
+                f"[OllamaInterviewer] No valid questions extracted for "
+                f"session={session_id}, chunk={chunk_index}. Raw response: {raw_text[:200]!r}"
             )
 
         logger.info(

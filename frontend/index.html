@@ -14,16 +14,19 @@
         <main class="dashboard">
             <header class="topbar">
                 <h1>Helperviewer <span>- AI Interview Assistant</span></h1>
-                <div id="models-status" class="models-status">
-                    <span class="status-dot"></span>
-                    <span class="status-text">Initializing models...</span>
+                <div style="display:flex;align-items:center;gap:10px;">
+                    <a href="/history" class="btn btn-secondary" style="font-size:12px;padding:6px 14px;text-decoration:none;">History</a>
+                    <div id="models-status" class="models-status">
+                        <span class="status-dot"></span>
+                        <span class="status-text">Initializing models...</span>
+                    </div>
                 </div>
             </header>
 
             <div class="workspace-grid">
                 <section class="left-column">
                     <div class="panel panel-video">
-                        <div class="panel-title">Candidate: <span id="candidate-name-display" contenteditable="true" spellcheck="false" title="Click to edit name">Alex</span> - Live Feed</div>
+                        <div class="panel-title">Candidate: <span id="candidate-name-display" contenteditable="true" spellcheck="false" title="Click to enter candidate name" data-placeholder="Enter name..."></span> - Live Feed</div>
 
                         <div class="video-frame">
                             <video id="video-preview" autoplay muted playsinline></video>

@@ -21,6 +21,7 @@ from services.connection_manager import (
 from routes.http_routes import register_http_routes
 from routes.websocket_handlers import register_socketio_handlers
 from services.text_streaming import stream_text
+from services.db_service import init_db
 
 # Configure logging
 logging.basicConfig(
@@ -77,6 +78,12 @@ chunk_processor = initialize_chunk_processor(socketio_instance=socketio)
 # This allows Flask to start immediately while models load asynchronously
 from services.model_loader import preload_all_models
 eventlet.spawn(preload_all_models)
+
+# Initialize database (non-blocking — app runs even if DB is unavailable)
+try:
+    init_db(Config.DATABASE_URL)
+except Exception as e:
+    logger.warning(f'DB initialization failed (continuing without persistence): {e}')
 
 # Register routes and handlers
 register_http_routes(app, chunk_processor, frontend_dir)
