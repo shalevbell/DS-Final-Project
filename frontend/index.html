@@ -41,6 +41,12 @@
                         <div class="action-strip">
                             <button id="btn-toggle-camera" class="btn btn-primary" type="button">Loading Models...</button>
                             <button id="clear-output-btn" class="btn btn-secondary" type="button">Clear Transcript</button>
+                            <input type="file" id="resume-file-input" accept=".pdf" style="display:none">
+                            <button id="resume-upload-btn" class="btn btn-secondary" type="button">Upload Resume</button>
+                            <div id="resume-chip" class="resume-chip" style="display:none">
+                                <span id="resume-filename"></span>
+                                <button id="resume-remove-btn" class="resume-chip-remove" type="button" aria-label="Remove resume">&times;</button>
+                            </div>
                         </div>
 
                         <div class="camera-selector">

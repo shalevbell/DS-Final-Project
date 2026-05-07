@@ -652,6 +652,20 @@ def analyze_audio_whisper(
             "processing_time_ms": int(processing_time_sec * 1000),
         }
 
+        # Persist transcript for next chunk's context window
+        if transcript_text:
+            try:
+                from services.connection_manager import get_redis_client
+                _r = get_redis_client()
+                if _r:
+                    _r.setex(
+                        f"session:{session_id}:whisper:transcript:{chunk_index}",
+                        7200,
+                        transcript_text,
+                    )
+            except Exception:
+                pass
+
         # Stream transcription to frontend
         from services.text_streaming import stream_text
         from app import socketio
@@ -1692,45 +1706,84 @@ def analyze_interviewer_questions_ollama(
         # Extract key signals with safe defaults
         transcript = whisper_result.get("transcript", "") or "(no transcript available)"
 
+        # Pull tail of previous chunk's transcript to bridge sentence cuts at 30s boundaries
+        prev_transcript_tail = ""
+        if chunk_index > 0:
+            try:
+                from services.connection_manager import get_redis_client
+                _r = get_redis_client()
+                if _r:
+                    _raw = _r.get(
+                        f"session:{session_id}:whisper:transcript:{chunk_index - 1}"
+                    )
+                    if _raw:
+                        prev_full = _raw.decode() if isinstance(_raw, bytes) else _raw
+                        # Keep only the last ~200 chars, trimmed to a sentence boundary
+                        tail = prev_full[-200:].strip()
+                        for sep in (". ", "? ", "! "):
+                            idx = tail.rfind(sep)
+                            if idx != -1:
+                                tail = tail[idx + 2:].strip()
+                                break
+                        if tail:
+                            prev_transcript_tail = tail
+            except Exception:
+                pass
+
         dominant_emotion = mediapipe_result.get("dominant_emotion", "unknown")
         emotion_confidence = mediapipe_result.get("emotion_confidence", 0.0)
         posture_score = mediapipe_result.get("posture_score", 0.0)
         engagement_score = mediapipe_result.get("engagement_score", 0.0)
-        hand_gestures_detected = mediapipe_result.get("hand_gestures_detected", False)
 
         vt_emotion = vocaltone_result.get("emotion", "unknown")
         vt_confidence = vocaltone_result.get("confidence", 0.0)
-        pitch_mean = vocaltone_result.get("pitch_mean", 0.0)
-        tempo = vocaltone_result.get("tempo", 0.0)
-        energy_level = vocaltone_result.get("energy_level", 0.0)
 
         domain = clifton_result.get("predicted_domain", "unknown")
-        domain_confidence = clifton_result.get("confidence", 0.0)
-        domain_probs = clifton_result.get("domain_probabilities", {})
-        development_opportunities = clifton_result.get("development_opportunities", [])
 
-        # Build context focusing on candidate's behavior, not technical details
-        # Interpret behavioral signals in plain language
-        emotion_desc = f"{dominant_emotion}" if dominant_emotion != "unknown" else "neutral"
-        posture_desc = "good" if posture_score > 0.6 else "slouched" if posture_score < 0.4 else "moderate"
-        engagement_desc = "highly engaged" if engagement_score > 0.6 else "disengaged" if engagement_score < 0.4 else "moderately engaged"
-        vocal_desc = f"{vt_emotion}" if vt_emotion != "unknown" else "neutral"
-        energy_desc = "high energy" if energy_level > 0.5 else "low energy"
+        # Map vocal emotions to plain-English interview directions
+        VOCAL_DIRECTIONS = {
+            "anger":    "ask what frustrated or upset them about this",
+            "disgust":  "ask what bothered or frustrated them about this",
+            "fear":     "ask what made them feel uncertain or anxious about this",
+            "sadness":  "ask what disappointed or concerned them about this",
+            "contempt": "ask what they found dismissive or problematic about this",
+        }
 
-        context_text = (
-            f"CANDIDATE'S RESPONSE (verbatim transcript):\n{transcript}\n\n"
-            f"OBSERVED BEHAVIOR:\n"
-            f"- Facial expression: {emotion_desc}\n"
-            f"- Body language: {posture_desc} posture, {engagement_desc}\n"
-            f"- Vocal tone: {vocal_desc}, {energy_desc}\n"
-            f"- Hand gestures: {'yes' if hand_gestures_detected else 'minimal'}\n\n"
-            f"STRENGTHS PROFILE:\n"
-            f"- Primary strength domain: {domain}\n"
-            f"- Areas for development: {', '.join(development_opportunities) if development_opportunities else 'none identified'}\n"
+        vocal_is_negative = vt_emotion.lower() in VOCAL_DIRECTIONS
+        facial_is_negative = dominant_emotion.lower() in VOCAL_DIRECTIONS
+        emotions_conflict = (
+            vocal_is_negative != facial_is_negative
+            and vt_confidence > 0.5
+            and emotion_confidence > 0.5
         )
 
+        # Single behavioral observation sentence — plain English so a small model can act on it directly
+        behavioral_note = ""
+        if emotions_conflict:
+            direction = VOCAL_DIRECTIONS.get(vt_emotion.lower(), "ask what they felt about this")
+            behavioral_note = (
+                f"Note: the candidate's voice sounded {vt_emotion} but their face looked {dominant_emotion}. "
+                f"Include one question that {direction}."
+            )
+        elif vocal_is_negative and vt_confidence > 0.65:
+            direction = VOCAL_DIRECTIONS[vt_emotion.lower()]
+            behavioral_note = (
+                f"Note: the candidate's voice sounded {vt_emotion}. "
+                f"Include one question that {direction}."
+            )
+        elif not vocal_is_negative and posture_score < 0.4:
+            behavioral_note = (
+                "Note: the candidate had poor posture and seemed disengaged. "
+                "Include one question asking what they find less interesting about this topic."
+            )
+        elif not vocal_is_negative and engagement_score < 0.4:
+            behavioral_note = (
+                "Note: the candidate seemed disengaged. "
+                "Include one question asking what they find less interesting about this topic."
+            )
+
         # Fetch optional interview context (role, requirements) stored in Redis at session start
-        _interview_context = ""
+        _role, _reqs = "", ""
         try:
             from services.connection_manager import get_redis_client
             _r = get_redis_client()
@@ -1740,54 +1793,60 @@ def analyze_interviewer_questions_ollama(
                     _meta = json.loads(_raw.decode() if isinstance(_raw, bytes) else _raw)
                     _role = (_meta.get('targetRole') or '').strip()
                     _reqs = (_meta.get('interviewRequirements') or '').strip()
-                    if _role:
-                        _interview_context += f"- Target role: {_role}\n"
-                    if _reqs:
-                        _interview_context += f"- What the interviewer is looking for: {_reqs}\n"
         except Exception:
-            pass  # Non-critical; degrade gracefully if Redis unavailable
+            pass
 
+        # Extract a short content-bearing phrase from the transcript to anchor Q1
+        _sentences = [s.strip() for s in re.split(r'(?<=[.!?,])\s+', transcript) if len(s.strip()) > 20]
+        _anchor = (_sentences[0][:70] + "...") if _sentences else transcript[:70]
+
+        # Build 3 explicit per-question targets so each model output drives one question
+        # Q1: content anchor from transcript (or behavioral signal if strong)
+        # Q2: body-language / vocal-tone observation
+        # Q3: Clifton domain + role context
+        if behavioral_note:
+            obs1 = f'The candidate mentioned: "{_anchor}" — ask a follow-up about this specific point.'
+            obs2 = behavioral_note
+        else:
+            obs1 = f'The candidate mentioned: "{_anchor}" — ask a follow-up about this specific point.'
+            obs2 = "Ask them to elaborate on the most interesting or surprising claim they made."
+
+        if domain != "unknown" and _role:
+            obs3 = f"The candidate's strength domain is {domain}. Ask how this relates to the {_role} role and what they just discussed."
+        elif domain != "unknown":
+            obs3 = f"The candidate's strength domain is {domain}. Ask a question that connects this strength to something specific they said."
+        elif _role:
+            obs3 = f"The candidate is interviewing for {_role}. Ask a question that probes their fit for this role based on what they said."
+        else:
+            obs3 = "Ask about a challenge or implication mentioned in what they said."
+
+        if _reqs:
+            obs3 += f" The interviewer wants to assess: {_reqs}."
+
+        # System prompt: role + output format only — no examples (small models copy them verbatim)
         system_prompt = (
-            "You are assisting a job interviewer. A candidate just answered a question on video.\n\n"
-            "YOUR TASK:\n"
-            "Generate 3 follow-up questions that the interviewer can ask TO THE CANDIDATE.\n\n"
-            "CRITICAL RULES:\n"
-            "1. The person in the video is the CANDIDATE (job applicant)\n"
-            "2. Questions should directly address the CANDIDATE using 'you'\n"
-            "3. Reference specific things the CANDIDATE said in their answer\n"
-            "4. Consider their vocal tone and body language when crafting questions\n"
-            "5. Probe deeper on topics they mentioned (ask for examples, clarifications, thinking process)\n"
-            "6. If tone/body language conflicts with words (e.g., nervous but claims confidence), probe that\n\n"
-            "OUTPUT FORMAT (STRICT):\n"
-            "- Output ONLY the 3 questions, nothing else\n"
-            "- Format: '1. ...?' then '2. ...?' then '3. ...?'\n"
-            "- Each question MUST end with '?'\n"
-            "- Each question MUST address the candidate directly\n"
-            "- NO introductions, explanations, or acknowledgments\n"
-            "- If you write ANYTHING besides the 3 questions they interviewer should ask the person interviewing, you FAIL\n\n"
-            "GOOD EXAMPLES (candidate discussed encryption/lava lamps):\n"
-            "1. You mentioned CloudFlare uses lava lamps for random number generation - can you explain how you would implement a similar system for a different use case?\n"
-            "2. What challenges do you think arise when trying to achieve true randomness in computer systems?\n"
-            "3. Can you give an example from your experience where you had to balance security requirements with practical constraints?\n\n"
-            "BAD EXAMPLES:\n"
-            "1. How did you manage the emotional response during the interview?\n"
-            "2. What are the strengths of your approach?\n"
-            "3. How would you handle a situation?\n"
-            "(BAD because: #1 treats candidate as interviewer, #2 & #3 are too generic and don't reference what they said)"
+            "You are a job interviewer's assistant. "
+            "Write 3 follow-up questions to ask the candidate. "
+            "Output only 3 numbered questions, each ending with '?'. "
+            "Each question must reference specific words or topics the candidate said. "
+            "Address the candidate as 'you'. No other text."
         )
 
-        if _interview_context:
-            system_prompt += (
-                "\n\nINTERVIEW CONTEXT (secondary — steer relevance, do not replace behavioral insights):\n"
-                f"{_interview_context}"
-                "PRIORITY: Let what the candidate SAID and HOW they said it drive question substance first. "
-                "Then frame those questions to be relevant to the role and qualities listed above."
+        # User prompt: 3 explicit observations → transcript → instruction
+        # Each observation maps to one question, covering content + behavior + strengths/role
+        transcript_with_context = transcript
+        if prev_transcript_tail:
+            transcript_with_context = (
+                f"[previous response ended: ...{prev_transcript_tail}]\n{transcript}"
             )
 
         user_prompt = (
-            "The candidate just gave this response. Generate 3 follow-up questions for the interviewer to ask the candidate. "
-            "Reference specific things they said. Output ONLY the 3 questions:\n\n"
-            f"{context_text}"
+            f"FOR QUESTION 1: {obs1}\n"
+            f"FOR QUESTION 2: {obs2}\n"
+            f"FOR QUESTION 3: {obs3}\n\n"
+            f"The candidate said:\n{transcript_with_context}\n\n"
+            f"Write 3 numbered questions, one for each instruction above. "
+            f"Use specific words from the transcript."
         )
 
         base_url = Config.OLLAMA_BASE_URL.rstrip("/")
@@ -1801,8 +1860,8 @@ def analyze_interviewer_questions_ollama(
             ],
             "stream": False,
             "options": {
-                "temperature": 0.3,
-                "num_predict": 300,
+                "temperature": 0.45,
+                "num_predict": 350,
                 "stop": ["\n\n\n", "4."],
             },
         }
@@ -1844,8 +1903,8 @@ def analyze_interviewer_questions_ollama(
                 "prompt": system_prompt + "\n\n" + user_prompt,
                 "stream": False,
                 "options": {
-                    "temperature": 0.3,
-                    "num_predict": 300,
+                    "temperature": 0.45,
+                    "num_predict": 350,
                     "stop": ["\n\n\n", "4."],
                 },
             }

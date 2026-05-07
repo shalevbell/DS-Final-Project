@@ -120,6 +120,13 @@ class VideoApp {
         this.sessionId = null;
         this.chunkIndex = null;
 
+        // Resume upload elements
+        this.resumeFileInput = document.getElementById('resume-file-input');
+        this.resumeUploadBtn = document.getElementById('resume-upload-btn');
+        this.resumeChip = document.getElementById('resume-chip');
+        this.resumeFilename = document.getElementById('resume-filename');
+        this.resumeRemoveBtn = document.getElementById('resume-remove-btn');
+
         // Disable camera button until models are ready
         this.toggleButton.disabled = true;
         this.toggleButton.textContent = 'Loading Models...';
@@ -128,6 +135,7 @@ class VideoApp {
         this.initializeEventListeners();
         this.enumerateCameras();
         this.startModelStatusCheck();
+        this._initResumeUpload();
 
         // Reliably close the session when navigating away mid-interview
         window.addEventListener('beforeunload', () => {
@@ -827,6 +835,66 @@ class VideoApp {
                 this.toggleButton.disabled = true;
             }
         }
+    }
+
+    _initResumeUpload() {
+        this._loadResumeFromStorage();
+
+        this.resumeUploadBtn.addEventListener('click', () => {
+            this.resumeFileInput.click();
+        });
+
+        this.resumeFileInput.addEventListener('change', (e) => {
+            const file = e.target.files[0];
+            if (!file) return;
+            this._handleResumeFile(file);
+            this.resumeFileInput.value = '';
+        });
+
+        this.resumeRemoveBtn.addEventListener('click', () => {
+            this._removeResume();
+        });
+    }
+
+    _handleResumeFile(file) {
+        const reader = new FileReader();
+        reader.onload = (e) => {
+            try {
+                localStorage.setItem('helperviewer_resume', JSON.stringify({
+                    name: file.name,
+                    data: e.target.result
+                }));
+            } catch {
+                // localStorage quota exceeded — chip still shows for this page session
+            }
+            this._showResumeChip(file.name);
+        };
+        reader.readAsDataURL(file);
+    }
+
+    _loadResumeFromStorage() {
+        try {
+            const raw = localStorage.getItem('helperviewer_resume');
+            if (raw) {
+                const { name } = JSON.parse(raw);
+                this._showResumeChip(name);
+            }
+        } catch {
+            localStorage.removeItem('helperviewer_resume');
+        }
+    }
+
+    _showResumeChip(filename) {
+        this.resumeFilename.textContent = filename;
+        this.resumeUploadBtn.style.display = 'none';
+        this.resumeChip.style.display = 'inline-flex';
+    }
+
+    _removeResume() {
+        localStorage.removeItem('helperviewer_resume');
+        this.resumeChip.style.display = 'none';
+        this.resumeUploadBtn.style.display = '';
+        this.resumeFilename.textContent = '';
     }
 
 }
