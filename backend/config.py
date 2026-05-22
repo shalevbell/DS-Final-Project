@@ -100,6 +100,8 @@ class Config:
     OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://ollama:11434")
     # Name of the Ollama model to use (e.g. llama3, mistral, phi3:mini, gemma3:270m, etc.)
     # Default to the very small \"gemma3:270m\" model to fit low-RAM environments.
-    OLLAMA_MODEL_NAME = os.getenv("OLLAMA_MODEL_NAME", "gemma3:1b")
+    OLLAMA_MODEL_NAME = os.getenv("OLLAMA_MODEL_NAME", "qwen3:0.6b")
     # Timeout in seconds for Ollama HTTP requests
     OLLAMA_TIMEOUT = int(os.getenv("OLLAMA_TIMEOUT", "60"))
+    # Lightweight model for resume-based warmup questions (qwen2.5:0.5b is ~352MB)
+    OLLAMA_RESUME_MODEL_NAME = os.getenv("OLLAMA_RESUME_MODEL_NAME", "qwen2.5:0.5b")

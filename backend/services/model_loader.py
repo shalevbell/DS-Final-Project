@@ -10,6 +10,7 @@ from pathlib import Path
 from faster_whisper import WhisperModel
 import mediapipe as mp
 import requests
+import eventlet
 
 from config import Config
 
@@ -335,6 +336,61 @@ def preload_ollama_model() -> bool:
         return False
 
 
+def preload_resume_model() -> None:
+    """
+    Pull the lightweight resume question model at startup.
+
+    Runs as a background greenthread so it never delays the start button.
+    Does not write to _preload_status — failures are non-critical.
+    """
+    try:
+        base_url = Config.OLLAMA_BASE_URL.rstrip("/")
+        model_name = Config.OLLAMA_RESUME_MODEL_NAME
+
+        logger.info(f'[ModelLoader] Checking resume model: "{model_name}"')
+
+        try:
+            response = requests.get(f"{base_url}/api/tags", timeout=10)
+            response.raise_for_status()
+            models = response.json().get("models", [])
+            if any(m.get("name", "").startswith(model_name) for m in models):
+                logger.info(f'[ModelLoader] Resume model "{model_name}" already downloaded')
+                return
+        except Exception as check_err:
+            logger.warning(f'[ModelLoader] Could not check resume model existence: {check_err}')
+
+        logger.info(f'[ModelLoader] Pulling resume model "{model_name}"...')
+        response = requests.post(
+            f"{base_url}/api/pull",
+            json={"name": model_name, "stream": True},
+            timeout=600,
+            stream=True,
+        )
+        response.raise_for_status()
+
+        import json as _json
+        last_logged_pct = -1
+        for line in response.iter_lines():
+            if line:
+                try:
+                    data = _json.loads(line)
+                    if "error" in data:
+                        logger.error(f'[ModelLoader] Resume model pull failed: {data["error"]}')
+                        return
+                    if "total" in data and "completed" in data and data["total"] > 0:
+                        pct = int(data["completed"] / data["total"] * 100)
+                        if pct // 10 != last_logged_pct // 10:
+                            logger.info(f'[ModelLoader] Resume model pull: {pct}%')
+                            last_logged_pct = pct
+                except _json.JSONDecodeError:
+                    continue
+
+        logger.info(f'[ModelLoader] Resume model "{model_name}" ready')
+
+    except Exception as e:
+        logger.warning(f'[ModelLoader] Failed to pull resume model (non-critical): {e}')
+
+
 def preload_all_models() -> dict:
     """
     Preload all ML models at application startup.
@@ -351,6 +407,9 @@ def preload_all_models() -> dict:
     logger.info('=' * 56)
     logger.info('[ModelLoader] Starting model preloading...')
     logger.info('=' * 56)
+
+    # Pull resume model in the background — non-blocking, no effect on all_ready
+    eventlet.spawn_n(preload_resume_model)
 
     status = {
         'whisper': preload_whisper_model(),

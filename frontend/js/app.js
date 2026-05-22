@@ -354,6 +354,12 @@ class VideoApp {
             if (this.targetRoleInput) this.targetRoleInput.disabled = true;
             if (this.interviewRequirementsInput) this.interviewRequirementsInput.disabled = true;
 
+            let resumeData = null;
+            try {
+                const raw = localStorage.getItem('helperviewer_resume');
+                if (raw) resumeData = JSON.parse(raw).data || null;
+            } catch { /* localStorage unavailable or malformed */ }
+
             this.sendWebSocketMessage('stream_ready', {
                 sessionId: this.sessionId,
                 candidateName: candidateName,
@@ -361,7 +367,8 @@ class VideoApp {
                 interviewRequirements: interviewRequirements,
                 status: 'active',
                 video: tracks.some(t => t.kind === 'video'),
-                audio: tracks.some(t => t.kind === 'audio')
+                audio: tracks.some(t => t.kind === 'audio'),
+                resumeData: resumeData
             });
 
             console.log('Camera started:', this.sessionId);
@@ -541,10 +548,11 @@ class VideoApp {
         // Always parse stream text for metric cards, even if this message is not displayed.
         this.updateInsightWidgets(text, metadata);
 
-        // Show only interviewer_ollama questions in the right-hand panel.
+        // Show interviewer_ollama and resume_questions in the right-hand panel.
         // Other sources (whisper, mediapipe, vocaltone, clifton_fusion, etc.)
         // are kept in logs only.
-        if (metadata && metadata.source && metadata.source !== 'interviewer_ollama') {
+        const displayedSources = ['interviewer_ollama', 'resume_questions'];
+        if (metadata && metadata.source && !displayedSources.includes(metadata.source)) {
             console.log('[TextStream] Skipping non-interviewer source:', metadata.source);
             return;
         }

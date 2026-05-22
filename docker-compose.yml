@@ -13,6 +13,7 @@ services:
       FLASK_ENV: development
       # Ollama interviewer questions service (internal Docker hostname "ollama")
       OLLAMA_BASE_URL: http://ollama:11434
+      OLLAMA_RESUME_MODEL_NAME: "qwen2.5:0.5b"
       # Training mode: Set to "1" to enable dataset download (only needed for model training)
       # Leave at "0" for inference-only mode (saves startup time and bandwidth)
       ENABLE_TRAINING: "0"

@@ -17,6 +17,7 @@ from services.connection_manager import get_redis_client, initialize_chunk_proce
 from services.video_processor import parse_chunk_data, convert_chunk_with_ffmpeg
 from services.chunk_storage import store_chunk_in_redis, notify_chunk_ready
 from services.db_service import save_session, complete_session
+from services.resume_questions import stream_resume_questions, decode_resume_data_url
 
 logger = logging.getLogger(__name__)
 
@@ -95,6 +96,16 @@ def register_socketio_handlers(socketio: SocketIO, config: Config):
                     )
                 except Exception as e:
                     logger.warning(f'DB save_session failed (non-critical): {e}')
+
+                # Kick off resume warmup questions if a resume was uploaded
+                resume_data_url = data.get('resumeData')
+                if resume_data_url:
+                    try:
+                        pdf_bytes = decode_resume_data_url(resume_data_url)
+                        eventlet.spawn_n(stream_resume_questions, session_id, pdf_bytes, target_role, socketio)
+                        logger.info(f'[ResumeQuestions] Warmup question generation started for session {session_id}')
+                    except Exception as e:
+                        logger.warning(f'[ResumeQuestions] Could not start warmup questions: {e}')
 
             emit('stream_acknowledged', {
                 'status': 'ready',
