@@ -1,8 +1,12 @@
 FROM python:3.11-slim
 
+# uv: fast Rust-based pip replacement (10-100x faster installs, better caching)
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /bin/uv
+
 WORKDIR /app
 
 # Install system dependencies in single layer (better caching)
+# Note: no rm -rf of apt lists — cache mounts handle cleanup automatically
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     --mount=type=cache,target=/var/lib/apt,sharing=locked \
     apt-get update && apt-get install -y --no-install-recommends \
@@ -10,15 +14,14 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     libgomp1 \
     postgresql-client \
     libglib2.0-0 \
-    unzip \
-    && rm -rf /var/lib/apt/lists/*
+    unzip
 
 # Copy requirements first (better layer caching - changes less frequently than code)
 COPY requirements.txt .
 
-# Install Python dependencies with BuildKit cache mount for pip
-RUN --mount=type=cache,target=/root/.cache/pip \
-    pip install --no-cache-dir -r requirements.txt
+# Install Python dependencies with BuildKit cache mount for uv
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv pip install --system -r requirements.txt
 
 # Copy application code (this layer changes most frequently)
 # Note: Whisper model is downloaded at runtime via lazy loading (first use)
