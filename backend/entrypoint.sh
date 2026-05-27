@@ -40,7 +40,7 @@ elif [ -n "${DRIVE_DATASET_ZIP_ID}" ] && need_download; then
     echo "[entrypoint] REFRESH_DATASET=1: clearing old dataset..."
     rm -rf /data/dataset/* /data/dataset/.[!.]* 2>/dev/null || true
   fi
-  if gdown "https://drive.google.com/uc?id=${DRIVE_DATASET_ZIP_ID}" -O /data/dataset/dataset.zip --remaining-ok 2>/dev/null; then
+  if gdown "https://drive.google.com/uc?id=${DRIVE_DATASET_ZIP_ID}" -O /data/dataset/dataset.zip 2>/dev/null; then
     echo "[entrypoint] Extracting ZIP..."
     if unzip -o -q /data/dataset/dataset.zip -d /data/dataset 2>/dev/null; then
       rm -f /data/dataset/dataset.zip
@@ -56,7 +56,7 @@ elif [ -n "${DRIVE_DATASET_FOLDER_ID}" ] && need_download; then
   echo "[entrypoint] Downloading dataset folder from Google Drive (folder ID: ${DRIVE_DATASET_FOLDER_ID})..."
   echo "[entrypoint] Note: folder download may get only part of the files. For full dataset use DRIVE_DATASET_ZIP_ID with a ZIP file."
   mkdir -p /data/dataset
-  if gdown --folder "https://drive.google.com/drive/folders/${DRIVE_DATASET_FOLDER_ID}" -O /data/dataset --remaining-ok 2>/dev/null; then
+  if gdown --folder "https://drive.google.com/drive/folders/${DRIVE_DATASET_FOLDER_ID}" -O /data/dataset 2>/dev/null; then
     flatten_dataset
   else
     echo "[entrypoint] WARNING: gdown failed. Ensure Drive folder is 'Anyone with the link can view'."
@@ -96,7 +96,7 @@ download_model_from_drive() {
   echo "[entrypoint] ${MODEL_NAME}: Downloading from Google Drive (file ID: ${DRIVE_FILE_ID})..."
   mkdir -p "${MODEL_DIR}"
 
-  if gdown "https://drive.google.com/uc?id=${DRIVE_FILE_ID}" -O "${MODEL_DIR}/${ZIP_NAME}" --remaining-ok; then
+  if gdown "https://drive.google.com/uc?id=${DRIVE_FILE_ID}" -O "${MODEL_DIR}/${ZIP_NAME}"; then
     echo "[entrypoint] ${MODEL_NAME}: Extracting..."
     if unzip -o -q "${MODEL_DIR}/${ZIP_NAME}" -d "${MODEL_DIR}"; then
       rm -f "${MODEL_DIR}/${ZIP_NAME}"
