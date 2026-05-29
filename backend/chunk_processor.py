@@ -292,6 +292,64 @@ class ChunkProcessor:
                     self.queue.add(session_id, next_c)
                     logger.debug(f'Released chunk {session_id}:{next_c} for processing (order)')
 
+    def _emit_interview_metrics(
+        self, session_id: str, chunk_index: int, interview_metrics: Dict
+    ):
+        """Push speaking rate / stress to the browser as soon as core models finish."""
+        if not self.socketio:
+            logger.warning('[Metrics] Cannot emit metrics_update — socketio not configured')
+            return
+
+        payload = {
+            'sessionId': session_id,
+            'chunkIndex': chunk_index,
+            'interview_metrics': interview_metrics,
+        }
+        sr = interview_metrics.get('speaking_rate') or {}
+        st = interview_metrics.get('stress_level') or {}
+        logger.info(
+            '[Metrics] Emitting metrics_update session=%s chunk=%s wpm=%s class=%s stress=%s%%',
+            session_id,
+            chunk_index,
+            sr.get('wpm'),
+            sr.get('classification'),
+            st.get('stress_percent'),
+        )
+
+        def _do_emit(data=payload):
+            try:
+                # No broadcast= — Flask-SocketIO rejects it outside a request context
+                self.socketio.emit('metrics_update', data)
+            except Exception as emit_err:
+                logger.error('[Metrics] metrics_update emit failed: %s', emit_err)
+
+        eventlet.spawn(_do_emit)
+
+    def _emit_chunk_results(self, session_id: str, chunk_index: int, results: Dict):
+        """Send full chunk results after all models complete."""
+        if not self.socketio:
+            return
+
+        payload = {
+            'sessionId': session_id,
+            'chunkIndex': chunk_index,
+            'results': results,
+        }
+
+        def _do_emit(data=payload):
+            try:
+                self.socketio.emit('chunk_results', data)
+                logger.info(
+                    '[ChunkResults] Emitted chunk_results session=%s chunk=%s keys=%s',
+                    session_id,
+                    chunk_index,
+                    list(results.keys()),
+                )
+            except Exception as emit_err:
+                logger.error('[ChunkResults] emit failed: %s', emit_err)
+
+        eventlet.spawn(_do_emit)
+
     def _process_chunk(self, session_id: str, chunk_index: int):
         """
         Process a single chunk with parallel analysis.
@@ -322,7 +380,6 @@ class ChunkProcessor:
                         self.socketio.emit(
                             'processing_heartbeat',
                             {'session_id': session_id, 'chunk_index': chunk_index},
-                            broadcast=True
                         )
                 except Exception:
                     pass
@@ -336,7 +393,8 @@ class ChunkProcessor:
                 video_bytes=video_bytes,
                 audio_bytes=audio_bytes,
                 session_id=session_id,
-                chunk_index=chunk_index
+                chunk_index=chunk_index,
+                on_interview_metrics=self._emit_interview_metrics,
             )
 
             # 4. Store results in Redis
@@ -367,6 +425,8 @@ class ChunkProcessor:
                     self.metrics['processing_times'] = self.metrics['processing_times'][-100:]
 
             logger.info(f'[Processing] Chunk {chunk_index} completed in {processing_time}ms')
+
+            self._emit_chunk_results(session_id, chunk_index, results)
         finally:
             heartbeat_stop.send()
             heartbeat_greenlet.kill()

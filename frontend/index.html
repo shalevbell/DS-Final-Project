@@ -6,18 +6,32 @@
     <title>Helperviewer - AI Interview Assistant</title>
     <link rel="icon" type="image/png" sizes="32x32" href="/frontend/favicon-32.png">
     <link rel="icon" type="image/png" sizes="64x64" href="/frontend/favicon-64.png">
+
+    <!-- Fonts: Inter (UI) + Syne (headings) + DM Mono (terminal) -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Figtree:wght@400;500;600&family=Syne:wght@700;800&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="css/style.css?v=8">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Syne:wght@700;800&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+
+    <!-- FontAwesome 6 for metric & button icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css" crossorigin="anonymous" referrerpolicy="no-referrer">
+
+    <link rel="stylesheet" href="css/style.css?v=10">
 </head>
 <body>
     <div class="app-shell">
         <main class="dashboard">
+
+            <!-- ── Topbar ──────────────────────────────────────────────── -->
             <header class="topbar">
-                <h1>Helperviewer <span>- AI Interview Assistant</span></h1>
+                <h1>
+                    <span class="brand-accent">Helperviewer</span>
+                    <span>- AI Interview Assistant</span>
+                </h1>
                 <div class="topbar-right">
-                    <a href="/history" class="btn btn-secondary">History</a>
+                    <a href="/history" class="btn btn-secondary">
+                        <i class="fa-solid fa-clock-rotate-left"></i>
+                        History
+                    </a>
                     <div id="models-status" class="models-status">
                         <span class="status-dot"></span>
                         <span class="status-text">Initializing models...</span>
@@ -26,10 +40,25 @@
             </header>
 
             <div class="workspace-grid">
+
+                <!-- ════════════════════════════════════════════════════
+                     LEFT COLUMN — Camera & Session Setup
+                     ════════════════════════════════════════════════════ -->
                 <section class="left-column">
                     <div class="panel panel-video">
-                        <div class="panel-title">Candidate: <span id="candidate-name-display" contenteditable="true" spellcheck="false" title="Click to enter candidate name" data-placeholder="Enter name..."></span> - Live Feed</div>
 
+                        <div class="panel-title">
+                            <i class="fa-solid fa-video"></i>
+                            Candidate:&nbsp;<span
+                                id="candidate-name-display"
+                                contenteditable="true"
+                                spellcheck="false"
+                                dir="auto"
+                                title="Click to enter candidate name"
+                                data-placeholder="Enter name..."></span>&nbsp;&mdash; Live Feed
+                        </div>
+
+                        <!-- Camera viewport -->
                         <div class="video-frame">
                             <video id="video-preview" autoplay muted playsinline></video>
                             <div id="connection-status" class="connection-indicator">
@@ -38,17 +67,26 @@
                             </div>
                         </div>
 
+                        <!-- Action buttons — note: btn-toggle-camera text is controlled by JS -->
                         <div class="action-strip">
                             <button id="btn-toggle-camera" class="btn btn-primary" type="button">Loading Models...</button>
-                            <button id="clear-output-btn" class="btn btn-secondary" type="button">Clear Transcript</button>
+                            <button id="clear-output-btn" class="btn btn-secondary" type="button">
+                                <i class="fa-solid fa-eraser"></i>
+                                Clear Transcript
+                            </button>
                             <input type="file" id="resume-file-input" accept=".pdf" style="display:none">
-                            <button id="resume-upload-btn" class="btn btn-secondary" type="button">Upload Resume</button>
+                            <button id="resume-upload-btn" class="btn btn-secondary" type="button">
+                                <i class="fa-solid fa-file-arrow-up"></i>
+                                Upload Resume
+                            </button>
                             <div id="resume-chip" class="resume-chip" style="display:none">
+                                <i class="fa-solid fa-file-pdf"></i>
                                 <span id="resume-filename"></span>
                                 <button id="resume-remove-btn" class="resume-chip-remove" type="button" aria-label="Remove resume">&times;</button>
                             </div>
                         </div>
 
+                        <!-- Camera device picker -->
                         <div class="camera-selector">
                             <label for="camera-select">Camera</label>
                             <select id="camera-select" class="camera-dropdown">
@@ -56,30 +94,116 @@
                             </select>
                         </div>
 
+                        <!-- Session configuration -->
                         <div class="session-setup">
                             <div class="setup-row">
-                                <label for="target-role">Target Role <span class="field-optional">(optional)</span></label>
-                                <input type="text" id="target-role" class="setup-input" placeholder="e.g. Software Engineer" maxlength="100" autocomplete="off">
+                                <label for="target-role">
+                                    Target Role
+                                    <span class="field-optional">(optional)</span>
+                                </label>
+                                <input
+                                    type="text"
+                                    id="target-role"
+                                    class="setup-input"
+                                    placeholder="e.g. Software Engineer"
+                                    maxlength="100"
+                                    autocomplete="off"
+                                    dir="auto">
                             </div>
                             <div class="setup-row">
-                                <label for="interview-requirements">What you're looking for <span class="field-optional">(optional)</span></label>
-                                <textarea id="interview-requirements" class="setup-textarea" placeholder="e.g. Looking for a leader who can work well with others..." maxlength="100" rows="2"></textarea>
-                                <div class="req-counter"><span id="req-char-count">0</span>/100</div>
+                                <label for="interview-requirements">
+                                    What you're looking for
+                                    <span class="field-optional">(optional)</span>
+                                </label>
+                                <textarea
+                                    id="interview-requirements"
+                                    class="setup-textarea"
+                                    placeholder="e.g. Looking for a leader who can work well with others..."
+                                    maxlength="100"
+                                    rows="2"
+                                    dir="auto"></textarea>
+                                <div class="req-counter">
+                                    <span id="req-char-count">0</span>/100
+                                </div>
                             </div>
                         </div>
 
+                        <!-- Permission hint (shown by JS when needed) -->
                         <div id="permission-info" class="permission-info hidden">
                             <p class="info-text">
-                                <strong>Permission Tip:</strong> If camera prompt does not show, reset browser site camera/microphone permissions.
+                                <strong>Permission Tip:</strong> If the camera prompt does not appear,
+                                reset browser site camera/microphone permissions.
                             </p>
                         </div>
+
                     </div>
                 </section>
 
+                <!-- ════════════════════════════════════════════════════
+                     RIGHT COLUMN — AI Insights Dashboard
+                     ════════════════════════════════════════════════════ -->
                 <section class="right-column">
-                    <div class="panel">
-                        <div class="panel-title">Interview Insights Dashboard</div>
+                    <div class="panel panel-insights">
 
+                        <div class="panel-title">
+                            <i class="fa-solid fa-microchip"></i>
+                            Interview Insights Dashboard
+                        </div>
+
+                        <!-- ── Questions terminal — visually aligned with camera frame ── -->
+                        <div class="output-content" id="output-content">
+                            <div class="output-placeholder">
+                                Interview questions and AI insights will appear here after you start the camera...
+                            </div>
+                        </div>
+
+                        <!-- ── Live Analytics: 4 placeholder metric cards (2×2) ── -->
+                        <div class="insights-section-label">
+                            <i class="fa-solid fa-chart-mixed"></i>
+                            Live Analytics
+                        </div>
+
+                        <div class="metrics-quad-grid">
+
+                            <!-- Speaking Rate (WPM) -->
+                            <div class="metric-card-sm">
+                                <div class="metric-icon-wrap">
+                                    <i class="fa-solid fa-gauge-high"></i>
+                                </div>
+                                <p class="metric-label">Speaking Rate</p>
+                                <p id="metric-speaking-rate" class="metric-value-sm">--</p>
+                            </div>
+
+                            <!-- Stress Level -->
+                            <div class="metric-card-sm">
+                                <div class="metric-icon-wrap">
+                                    <i class="fa-solid fa-bolt"></i>
+                                </div>
+                                <p class="metric-label">Stress Level</p>
+                                <p id="metric-stress-level" class="metric-value-sm">--</p>
+                            </div>
+
+                            <!-- Eye Contact -->
+                            <div class="metric-card-sm">
+                                <div class="metric-icon-wrap">
+                                    <i class="fa-solid fa-eye"></i>
+                                </div>
+                                <p class="metric-label">Eye Contact</p>
+                                <p class="metric-value-sm">--</p>
+                            </div>
+
+                            <!-- Confidence -->
+                            <div class="metric-card-sm">
+                                <div class="metric-icon-wrap">
+                                    <i class="fa-solid fa-chart-line"></i>
+                                </div>
+                                <p class="metric-label">Confidence</p>
+                                <p class="metric-value-sm">--</p>
+                            </div>
+
+                        </div><!-- /metrics-quad-grid -->
+
+                        <!-- ── Backend-connected metrics (updated by WebSocket) ── -->
                         <div class="metrics-grid">
                             <div class="metric-card">
                                 <p class="metric-label">Engagement Score</p>
@@ -91,29 +215,29 @@
                             </div>
                         </div>
 
+                        <!-- ── Voice Profile ── -->
                         <div class="sub-panel">
-                            <h3>Live Question Generation</h3>
-                            <div class="output-content" id="output-content">
-                                <div class="output-placeholder">
-                                    Interview questions and AI insights will appear here after you start the camera...
+                            <h3>Voice Profile</h3>
+                            <div class="voice-metrics">
+                                <div>
+                                    <span>Pitch</span>
+                                    <strong id="voice-pitch">-</strong>
+                                </div>
+                                <div>
+                                    <span>Tempo</span>
+                                    <strong id="voice-tempo">-</strong>
                                 </div>
                             </div>
                         </div>
 
-                        <div class="sub-panel">
-                            <h3>Voice Profile</h3>
-                            <div class="voice-metrics">
-                                <div><span>Pitch:</span> <strong id="voice-pitch">-</strong></div>
-                                <div><span>Tempo:</span> <strong id="voice-tempo">-</strong></div>
-                            </div>
-                        </div>
-                    </div>
+                    </div><!-- /panel panel-insights -->
                 </section>
-            </div>
+
+            </div><!-- /workspace-grid -->
         </main>
-    </div>
+    </div><!-- /app-shell -->
 
     <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
-    <script src="js/app.js?v=7"></script>
+    <script src="js/app.js?v=8"></script>
 </body>
 </html>

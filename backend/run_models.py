@@ -12,7 +12,7 @@ import traceback
 import urllib.request
 from collections import Counter
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Callable, Dict, List, Optional
 from concurrent.futures import ThreadPoolExecutor
 import json
 import re
@@ -607,17 +607,37 @@ def analyze_audio_whisper(
         logger.info(f"[Whisper] Starting transcription: {session_id}:{chunk_index}")
 
         segments, info = model.transcribe(
-            audio_source, beam_size=1, vad_filter=True, word_timestamps=False
+            audio_source, beam_size=1, vad_filter=True, word_timestamps=True
         )
 
         segment_list = []
         transcript_parts = []
+        word_count = 0
+        words_list: List[Dict] = []
+
         for segment in segments:
+            segment_words = []
+            if getattr(segment, "words", None):
+                for word in segment.words:
+                    word_count += 1
+                    word_entry = {
+                        "start": float(word.start),
+                        "end": float(word.end),
+                        "word": word.word.strip(),
+                    }
+                    words_list.append(word_entry)
+                    segment_words.append(word_entry)
+            else:
+                # Fallback when word-level timestamps are unavailable
+                tokens = segment.text.split()
+                word_count += len(tokens)
+
             segment_list.append(
                 {
                     "start": float(segment.start),
                     "end": float(segment.end),
                     "text": segment.text,
+                    "words": segment_words,
                 }
             )
             transcript_parts.append(segment.text)
@@ -625,8 +645,14 @@ def analyze_audio_whisper(
         transcript_text = " ".join(
             part.strip() for part in transcript_parts if part
         ).strip()
+
+        if word_count == 0 and transcript_text:
+            word_count = len(transcript_text.split())
+
         if transcript_text:
-            logger.info(f"[Whisper] Transcript: {transcript_text}")
+            logger.info(
+                f"[Whisper] Transcript ({word_count} words): {transcript_text}"
+            )
 
         processing_time_sec = time.time() - start_time
         audio_duration = getattr(info, "duration", None)
@@ -646,9 +672,12 @@ def analyze_audio_whisper(
 
         result = {
             "transcript": transcript_text,
+            "word_count": word_count,
+            "words": words_list,
             "confidence": getattr(info, "language_probability", None),
             "language": getattr(info, "language", "en"),
             "segments": segment_list,
+            "audio_duration_sec": audio_duration_sec,
             "processing_time_ms": int(processing_time_sec * 1000),
         }
 
@@ -1180,6 +1209,12 @@ def analyze_video_mediapipe(
         all_face_results = []
         all_pose_results = []
         all_hand_results = []
+        pose_vectors = []
+
+        from services.interview_metrics import (
+            compute_pose_movement_metrics,
+            extract_pose_vector,
+        )
 
         # Process frames
         while cap.isOpened():
@@ -1211,6 +1246,10 @@ def analyze_video_mediapipe(
                     all_pose_results.append(pose_result.pose_landmarks)
                     all_hand_results.append(hand_result.hand_landmarks)
 
+                    pose_vec = extract_pose_vector(pose_result.pose_landmarks)
+                    if pose_vec is not None:
+                        pose_vectors.append(pose_vec)
+
                     frames_analyzed += 1
                 except Exception as e:
                     logger.debug(
@@ -1220,6 +1259,8 @@ def analyze_video_mediapipe(
             frame_count += 1
 
         cap.release()
+
+        movement_variance, posture_delta = compute_pose_movement_metrics(pose_vectors)
 
         # Analyze aggregated results with intensity-weighted emotion scoring
         face_analyses = []
@@ -1333,10 +1374,13 @@ def analyze_video_mediapipe(
             "emotion_confidence": round(avg_emotion_confidence, 2),
             "posture_score": round(avg_posture_score, 2),
             "engagement_score": round(engagement_score, 2),
+            "movement_variance": round(movement_variance, 6),
+            "posture_delta": round(posture_delta, 5),
             "hand_gestures_detected": hand_gestures_detected,
             "facial_landmarks_detected": len(face_analyses) > 0,
             "pose_landmarks_detected": len(posture_scores) > 0,
             "frames_analyzed": frames_analyzed,
+            "video_duration_sec": round(duration_sec, 3) if duration_sec else None,
             "processing_time_ms": processing_time,
         }
 
@@ -2214,6 +2258,7 @@ def run_parallel_analysis(
     chunk_index: int,
     max_workers: int = None,
     timeout: int = 300,
+    on_interview_metrics: Optional[Callable[[str, int, Dict], None]] = None,
 ) -> Dict:
     """
     Run all analysis functions with dependency support.
@@ -2302,6 +2347,25 @@ def run_parallel_analysis(
                     f"[{name}] Exception for chunk {session_id}:{chunk_index}: {e}"
                 )
                 results[name] = {"error": str(e)}
+
+    # Derived metrics from core models — emit before slow dependent models (Ollama, etc.)
+    try:
+        from services.interview_metrics import attach_interview_metrics
+
+        attach_interview_metrics(
+            results,
+            session_id,
+            chunk_index,
+            on_metrics_ready=on_interview_metrics,
+        )
+    except Exception as metrics_err:
+        logger.warning(
+            "[InterviewMetrics] Early compute failed for %s:%s: %s",
+            session_id,
+            chunk_index,
+            metrics_err,
+        )
+        results["interview_metrics"] = {"error": str(metrics_err)}
 
     # Phase 3: Run dependent models sequentially
     for model_name, model_config in dependent_models.items():

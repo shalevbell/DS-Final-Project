@@ -102,6 +102,8 @@ class VideoApp {
         this.postureStability = document.getElementById('posture-stability');
         this.voicePitch = document.getElementById('voice-pitch');
         this.voiceTempo = document.getElementById('voice-tempo');
+        this.metricSpeakingRate = document.getElementById('metric-speaking-rate');
+        this.metricStressLevel = document.getElementById('metric-stress-level');
         this.sentimentAlert = document.getElementById('sentiment-alert');
         this.localStream = null;
         this.mediaRecorder = null;
@@ -163,11 +165,15 @@ class VideoApp {
 
     initializeWebSocket() {
         if (typeof io === 'undefined') return;
-        const { protocol, hostname } = window.location;
-        const backendPort = '5555';  // Backend runs on port 5555
+        const { protocol, hostname, port } = window.location;
+        // Same origin when the page is served by Flask (http://localhost:5555)
+        const servedByBackend = port === '5555' || port === '5000';
+        const socketUrl = servedByBackend
+            ? undefined
+            : `${protocol}//${hostname}:5555`;
         // Long timeouts so connection survives slow model runs (2–3 min per chunk)
-        this.socket = io(`${protocol}//${hostname}:${backendPort}`, {
-            transports: ['websocket'],
+        this.socket = io(socketUrl, {
+            transports: ['websocket', 'polling'],
             reconnection: true,
             reconnectionDelay: 1000,
             reconnectionDelayMax: 15000,
@@ -198,13 +204,25 @@ class VideoApp {
         this.socket.on('processing_heartbeat', () => {
             // Keep connection alive during long backend processing
         });
+        this.socket.on('metrics_update', (data) => {
+            console.log('[MetricsUpdate] Received', data);
+            const metrics = data?.interview_metrics;
+            const chunkIndex = data?.chunkIndex;
+            if (metrics) {
+                this.updateInterviewMetrics(metrics, chunkIndex);
+            } else {
+                console.warn('[MetricsUpdate] Missing interview_metrics in payload', data);
+            }
+        });
         this.socket.on('chunk_results', (data) => {
-            // Only log raw model outputs; UI shows interviewer questions only
             const { chunkIndex, results } = data || {};
             if (chunkIndex !== undefined && results) {
                 console.log(
                     `[ChunkResults] Chunk ${chunkIndex} models: ${Object.keys(results).join(', ')}`
                 );
+                if (results.interview_metrics) {
+                    console.log('[ChunkResults] interview_metrics', results.interview_metrics);
+                }
                 this.updateMetricsFromChunkResults(results);
             } else {
                 console.log('[ChunkResults] Received chunk results', data);
@@ -608,11 +626,55 @@ class VideoApp {
         }
     }
 
+    updateInterviewMetrics(interviewMetrics, chunkIndex) {
+        if (!interviewMetrics || typeof interviewMetrics !== 'object') {
+            console.warn('[Metrics] updateInterviewMetrics called with empty data');
+            return;
+        }
+
+        const speakingRate = interviewMetrics.speaking_rate || {};
+        const stressLevel = interviewMetrics.stress_level || {};
+
+        if (!this.metricSpeakingRate) {
+            console.error('[Metrics] #metric-speaking-rate element not found in DOM');
+        }
+        if (!this.metricStressLevel) {
+            console.error('[Metrics] #metric-stress-level element not found in DOM');
+        }
+
+        if (typeof speakingRate.wpm === 'number' && this.metricSpeakingRate) {
+            const label = speakingRate.classification ? ` (${speakingRate.classification})` : '';
+            const text = `${Math.round(speakingRate.wpm)}${label}`;
+            this.metricSpeakingRate.textContent = text;
+            console.log(
+                `[Metrics] Chunk ${chunkIndex ?? '?'} Speaking Rate → ${text}`,
+                speakingRate
+            );
+        } else {
+            console.warn('[Metrics] No speaking_rate.wpm in payload', speakingRate);
+        }
+
+        if (stressLevel.stress_percent !== undefined && stressLevel.stress_percent !== null && this.metricStressLevel) {
+            const text = `${Math.round(stressLevel.stress_percent)}%`;
+            this.metricStressLevel.textContent = text;
+            console.log(
+                `[Metrics] Chunk ${chunkIndex ?? '?'} Stress Level → ${text}`,
+                stressLevel
+            );
+        } else {
+            console.warn('[Metrics] No stress_level.stress_percent in payload', stressLevel);
+        }
+    }
+
     updateMetricsFromChunkResults(results) {
         if (!results || typeof results !== 'object') return;
 
         const mediapipe = results.mediapipe || {};
         const vocaltone = results.vocaltone || {};
+
+        if (results.interview_metrics) {
+            this.updateInterviewMetrics(results.interview_metrics);
+        }
 
         if (typeof mediapipe.engagement_score === 'number' && this.engagementScore) {
             this.engagementScore.textContent = `${Math.round(Math.max(0, Math.min(1, mediapipe.engagement_score)) * 100)}%`;
@@ -670,6 +732,8 @@ class VideoApp {
         if (this.postureStability) this.postureStability.textContent = '--%';
         if (this.voicePitch) this.voicePitch.textContent = '-';
         if (this.voiceTempo) this.voiceTempo.textContent = '-';
+        if (this.metricSpeakingRate) this.metricSpeakingRate.textContent = '--';
+        if (this.metricStressLevel) this.metricStressLevel.textContent = '--';
         if (this.sentimentAlert) {
             this.sentimentAlert.className = 'alert-chip neutral';
             this.sentimentAlert.textContent = 'No sentiment alerts';
