@@ -15,9 +15,10 @@ from collections import defaultdict
 
 import redis
 import eventlet
+import eventlet.tpool
 
 from processing_queue import ProcessingQueue
-from run_models import run_parallel_analysis, get_available_models
+from run_models import run_parallel_analysis, get_available_models, analyze_interviewer_questions_ollama
 from utils.redis_helper import (
     get_chunk_video_key,
     get_chunk_audio_key,
@@ -330,14 +331,28 @@ class ChunkProcessor:
 
         heartbeat_greenlet = eventlet.spawn(_heartbeat_loop)
         try:
-            # 3. Run parallel analysis
-            # RUNS THE MODELS FOR THE CHUNK
-            results = run_parallel_analysis(
-                video_bytes=video_bytes,
-                audio_bytes=audio_bytes,
-                session_id=session_id,
-                chunk_index=chunk_index
+            # 3. Run analysis in a real OS thread via tpool (frees the eventlet hub).
+            # Inside, models run on unpatched OS threads — no eventlet primitives.
+            results = eventlet.tpool.execute(
+                run_parallel_analysis,
+                video_bytes,
+                audio_bytes,
+                session_id,
+                chunk_index,
             )
+
+            # 3b. Fire Ollama question generation in background — does not block chunk completion.
+            # Passes already-computed dependency results so Ollama can start immediately.
+            ollama_deps = {
+                dep: results.get(dep, {})
+                for dep in ("whisper", "mediapipe", "vocaltone", "clifton_fusion")
+            }
+            ollama_thread = threading.Thread(
+                target=self._run_ollama_background,
+                args=(audio_bytes, session_id, chunk_index, ollama_deps),
+                daemon=True,
+            )
+            ollama_thread.start()
 
             # 4. Store results in Redis
             self._store_results(session_id, chunk_index, results)
@@ -370,6 +385,52 @@ class ChunkProcessor:
         finally:
             heartbeat_stop.send()
             heartbeat_greenlet.kill()
+
+    def _run_ollama_background(
+        self,
+        audio_bytes: bytes,
+        session_id: str,
+        chunk_index: int,
+        dependencies: Dict,
+    ):
+        """
+        Run Ollama question generation in a background thread.
+
+        Called after run_parallel_analysis() completes so Ollama does not block
+        the chunk-to-chunk processing pipeline. Results are stored to Redis and
+        PostgreSQL when generation finishes, and streamed to the frontend via the
+        existing text_stream SocketIO event inside analyze_interviewer_questions_ollama.
+        """
+        try:
+            result = analyze_interviewer_questions_ollama(
+                audio_bytes, session_id, chunk_index, dependencies=dependencies
+            )
+
+            # Store result to Redis under the standard per-model key
+            result_key = get_chunk_results_key(session_id, chunk_index, 'interviewer_ollama')
+            self.redis_data_client.setex(result_key, 3600, json.dumps(result))
+
+            # Merge Ollama result into the existing chunk_results row (JSONB ||)
+            try:
+                from services.db_service import merge_chunk_model_result
+                merge_chunk_model_result(session_id, chunk_index, 'interviewer_ollama', result)
+            except Exception as db_err:
+                logger.warning(
+                    f'[Ollama] DB merge failed for {session_id}:{chunk_index} '
+                    f'(non-critical): {db_err}'
+                )
+
+            processing_time = result.get('processing_time_ms', 0)
+            logger.info(
+                f'[Ollama] Background generation completed for '
+                f'{session_id}:{chunk_index} in {processing_time}ms'
+            )
+
+        except Exception as e:
+            logger.error(
+                f'[Ollama] Background generation failed for '
+                f'{session_id}:{chunk_index}: {e}'
+            )
 
     def _get_chunk_data(self, session_id: str, chunk_index: int):
         """

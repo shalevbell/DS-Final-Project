@@ -7,6 +7,14 @@ Initializes the Flask app, registers routes/handlers, and starts the chunk proce
 import logging
 import os
 import signal
+import warnings
+
+# Suppress third-party deprecation/info noise before any imports trigger it
+warnings.filterwarnings("ignore")          # protobuf SymbolDatabase deprecation + others
+os.environ.setdefault("GLOG_minloglevel", "3")           # MediaPipe C++ logs (0=INFO … 3=FATAL)
+os.environ.setdefault("GLOG_logtostderr", "0")           # keep MediaPipe C++ logs off stderr
+os.environ.setdefault("ONNXRUNTIME_SEVERITY_LEVEL", "4") # onnxruntime: 0=verbose … 4=fatal
+
 from flask import Flask
 from flask_cors import CORS
 from flask_socketio import SocketIO
@@ -30,13 +38,14 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# Silence noisy third-party loggers
+logging.getLogger('faster_whisper').setLevel(logging.WARNING)
+
 # Filter to suppress harmless socket shutdown errors from eventlet
 class SocketShutdownFilter(logging.Filter):
     def filter(self, record):
-        # Suppress "Bad file descriptor" socket shutdown errors
         return 'socket shutdown error' not in record.getMessage()
 
-# Apply filter to root logger (catches eventlet messages)
 logging.getLogger().addFilter(SocketShutdownFilter())
 
 # Get the frontend directory path

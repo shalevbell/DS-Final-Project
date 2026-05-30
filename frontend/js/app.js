@@ -215,7 +215,7 @@ class VideoApp {
             this.handleTextStream(data);
         });
     }
-    
+
     sendWebSocketMessage(event, data = {}) {
         if (this.socket && this.socketConnected) {
             this.socket.emit(event, data);
@@ -377,7 +377,7 @@ class VideoApp {
             this.handleError(error);
         }
     }
-    
+
     startRecording() {
         if (!this.localStream) {
             console.warn('Stream not available');
@@ -508,7 +508,7 @@ class VideoApp {
         if (this.interviewRequirementsInput) this.interviewRequirementsInput.disabled = false;
         console.log('Camera stopped');
     }
-    
+
 
     updateConnectionStatus(connected) {
         if (connected) {

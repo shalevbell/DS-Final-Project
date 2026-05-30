@@ -180,6 +180,37 @@ def save_chunk_results(
         return False
 
 
+def merge_chunk_model_result(
+    session_id: str,
+    chunk_index: int,
+    model_name: str,
+    result: Dict,
+) -> bool:
+    """
+    Merge a single model's result into an existing chunk_results row using JSONB ||.
+
+    Safe to call after the main save_chunk_results — merges without overwriting other models.
+    """
+    try:
+        with _get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    UPDATE chunk_results
+                       SET model_results = model_results || jsonb_build_object(%s::text, %s::jsonb)
+                     WHERE session_id = %s AND chunk_index = %s
+                    """,
+                    (model_name, json.dumps(result), session_id, chunk_index),
+                )
+        return True
+    except Exception as e:
+        logger.warning(
+            f'[DB] merge_chunk_model_result failed for {session_id}:{chunk_index} '
+            f'model={model_name}: {e}'
+        )
+        return False
+
+
 def list_sessions(
     candidate_filter: Optional[str] = None,
     limit: int = 20,

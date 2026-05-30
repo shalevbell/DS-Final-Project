@@ -13,10 +13,10 @@ import urllib.request
 from collections import Counter
 from pathlib import Path
 from typing import Dict, List, Optional
-from concurrent.futures import ThreadPoolExecutor
 import json
 import re
 
+import threading
 import cv2
 import mediapipe as mp
 import numpy as np
@@ -27,6 +27,15 @@ import joblib
 import requests
 
 from config import Config
+
+# eventlet.patcher.original gives access to the real (unpatched) stdlib modules.
+# Used to create OS-level primitives that are safe across real OS threads.
+import eventlet.patcher as _ep
+_orig_threading = _ep.original('threading')
+
+# Serialise Ollama requests — single CPU inference slot. Must be a real OS lock,
+# not an eventlet green lock, because the background thread is a real OS thread.
+_ollama_lock = _orig_threading.Lock()
 
 logger = logging.getLogger(__name__)
 
@@ -1080,78 +1089,62 @@ def analyze_video_mediapipe(
         video_kb = len(video_bytes) // 1024
         logger.info(f"[MediaPipe] Analyzing video: {video_kb}KB")
 
-        # Initialize MediaPipe models on first use (lazy loading)
-        if not hasattr(analyze_video_mediapipe, "_landmarkers"):
+        # Ensure model files are downloaded (preloader sets _models_downloaded flag)
+        models_dir = Path(Config.MEDIAPIPE_MODEL_DIR)
+        if not getattr(analyze_video_mediapipe, "_models_downloaded", False):
             logger.warning(
-                "[MediaPipe] Models not preloaded! Initializing now (this should not happen)."
+                "[MediaPipe] Models not preloaded! Downloading now (this should not happen)."
             )
-
-            # Create models directory
-            models_dir = Path(Config.MEDIAPIPE_MODEL_DIR)
             models_dir.mkdir(exist_ok=True, parents=True)
-
-            # Model URLs
             model_urls = {
                 Config.MEDIAPIPE_FACE_MODEL: "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task",
                 Config.MEDIAPIPE_POSE_MODEL: "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task",
                 Config.MEDIAPIPE_HAND_MODEL: "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task",
             }
-
-            # Download models if needed
             for model_name, url in model_urls.items():
                 if not _download_mediapipe_model(model_name, url, models_dir):
                     raise RuntimeError(f"Failed to download {model_name}")
+            analyze_video_mediapipe._models_downloaded = True
 
-            # Initialize landmarkers
-            base_options_face = mp.tasks.BaseOptions(
-                model_asset_path=str(models_dir / Config.MEDIAPIPE_FACE_MODEL)
-            )
-            base_options_pose = mp.tasks.BaseOptions(
-                model_asset_path=str(models_dir / Config.MEDIAPIPE_POSE_MODEL)
-            )
-            base_options_hand = mp.tasks.BaseOptions(
-                model_asset_path=str(models_dir / Config.MEDIAPIPE_HAND_MODEL)
-            )
+        # Create per-call VIDEO mode landmarkers (VIDEO mode is stateful, not safe to share
+        # across concurrent chunk invocations — each call gets its own instances)
+        base_options_face = mp.tasks.BaseOptions(
+            model_asset_path=str(models_dir / Config.MEDIAPIPE_FACE_MODEL)
+        )
+        base_options_pose = mp.tasks.BaseOptions(
+            model_asset_path=str(models_dir / Config.MEDIAPIPE_POSE_MODEL)
+        )
+        base_options_hand = mp.tasks.BaseOptions(
+            model_asset_path=str(models_dir / Config.MEDIAPIPE_HAND_MODEL)
+        )
 
-            face_options = mp.tasks.vision.FaceLandmarkerOptions(
-                base_options=base_options_face,
-                running_mode=mp.tasks.vision.RunningMode.IMAGE,
-                num_faces=1,
-                min_face_detection_confidence=Config.MEDIAPIPE_FACE_MIN_DETECTION_CONFIDENCE,
-                min_face_presence_confidence=Config.MEDIAPIPE_FACE_MIN_PRESENCE_CONFIDENCE,
-                min_tracking_confidence=Config.MEDIAPIPE_FACE_MIN_TRACKING_CONFIDENCE,
-            )
+        face_options = mp.tasks.vision.FaceLandmarkerOptions(
+            base_options=base_options_face,
+            running_mode=mp.tasks.vision.RunningMode.VIDEO,
+            num_faces=1,
+            min_face_detection_confidence=Config.MEDIAPIPE_FACE_MIN_DETECTION_CONFIDENCE,
+            min_face_presence_confidence=Config.MEDIAPIPE_FACE_MIN_PRESENCE_CONFIDENCE,
+            min_tracking_confidence=Config.MEDIAPIPE_FACE_MIN_TRACKING_CONFIDENCE,
+        )
+        pose_options = mp.tasks.vision.PoseLandmarkerOptions(
+            base_options=base_options_pose,
+            running_mode=mp.tasks.vision.RunningMode.VIDEO,
+            min_pose_detection_confidence=Config.MEDIAPIPE_POSE_MIN_DETECTION_CONFIDENCE,
+            min_pose_presence_confidence=Config.MEDIAPIPE_POSE_MIN_PRESENCE_CONFIDENCE,
+            min_tracking_confidence=Config.MEDIAPIPE_POSE_MIN_TRACKING_CONFIDENCE,
+        )
+        hand_options = mp.tasks.vision.HandLandmarkerOptions(
+            base_options=base_options_hand,
+            running_mode=mp.tasks.vision.RunningMode.VIDEO,
+            num_hands=2,
+            min_hand_detection_confidence=Config.MEDIAPIPE_HAND_MIN_DETECTION_CONFIDENCE,
+            min_hand_presence_confidence=Config.MEDIAPIPE_HAND_MIN_PRESENCE_CONFIDENCE,
+            min_tracking_confidence=Config.MEDIAPIPE_HAND_MIN_TRACKING_CONFIDENCE,
+        )
 
-            pose_options = mp.tasks.vision.PoseLandmarkerOptions(
-                base_options=base_options_pose,
-                running_mode=mp.tasks.vision.RunningMode.IMAGE,
-                min_pose_detection_confidence=Config.MEDIAPIPE_POSE_MIN_DETECTION_CONFIDENCE,
-                min_pose_presence_confidence=Config.MEDIAPIPE_POSE_MIN_PRESENCE_CONFIDENCE,
-                min_tracking_confidence=Config.MEDIAPIPE_POSE_MIN_TRACKING_CONFIDENCE,
-            )
-
-            hand_options = mp.tasks.vision.HandLandmarkerOptions(
-                base_options=base_options_hand,
-                running_mode=mp.tasks.vision.RunningMode.IMAGE,
-                num_hands=2,
-                min_hand_detection_confidence=Config.MEDIAPIPE_HAND_MIN_DETECTION_CONFIDENCE,
-                min_hand_presence_confidence=Config.MEDIAPIPE_HAND_MIN_PRESENCE_CONFIDENCE,
-                min_tracking_confidence=Config.MEDIAPIPE_HAND_MIN_TRACKING_CONFIDENCE,
-            )
-
-            analyze_video_mediapipe._landmarkers = {
-                "face": mp.tasks.vision.FaceLandmarker.create_from_options(
-                    face_options
-                ),
-                "pose": mp.tasks.vision.PoseLandmarker.create_from_options(
-                    pose_options
-                ),
-                "hand": mp.tasks.vision.HandLandmarker.create_from_options(
-                    hand_options
-                ),
-            }
-
-            logger.info("[MediaPipe] Models initialized successfully")
+        face_landmarker = mp.tasks.vision.FaceLandmarker.create_from_options(face_options)
+        pose_landmarker = mp.tasks.vision.PoseLandmarker.create_from_options(pose_options)
+        hand_landmarker = mp.tasks.vision.HandLandmarker.create_from_options(hand_options)
 
         # Save video bytes to temporary file
         with tempfile.NamedTemporaryFile(suffix=".mp4", delete=False) as tmp_file:
@@ -1195,17 +1188,12 @@ def analyze_video_mediapipe(
                 # Create MediaPipe Image
                 mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb_frame)
 
-                # Process with landmarkers (IMAGE mode - no timestamp needed)
+                # Process with VIDEO mode landmarkers (require monotonic timestamp_ms)
+                timestamp_ms = int(frame_count / fps * 1000) if fps > 0 else frame_count
                 try:
-                    face_result = analyze_video_mediapipe._landmarkers["face"].detect(
-                        mp_image
-                    )
-                    pose_result = analyze_video_mediapipe._landmarkers["pose"].detect(
-                        mp_image
-                    )
-                    hand_result = analyze_video_mediapipe._landmarkers["hand"].detect(
-                        mp_image
-                    )
+                    face_result = face_landmarker.detect_for_video(mp_image, timestamp_ms)
+                    pose_result = pose_landmarker.detect_for_video(mp_image, timestamp_ms)
+                    hand_result = hand_landmarker.detect_for_video(mp_image, timestamp_ms)
 
                     all_face_results.append(face_result.face_landmarks)
                     all_pose_results.append(pose_result.pose_landmarks)
@@ -1220,6 +1208,9 @@ def analyze_video_mediapipe(
             frame_count += 1
 
         cap.release()
+        face_landmarker.close()
+        pose_landmarker.close()
+        hand_landmarker.close()
 
         # Analyze aggregated results with intensity-weighted emotion scoring
         face_analyses = []
@@ -1861,7 +1852,9 @@ def analyze_interviewer_questions_ollama(
             "stream": False,
             "options": {
                 "temperature": 0.45,
-                "num_predict": 350,
+                "num_predict": 200,
+                "num_ctx": 1024,
+                "num_thread": 4,
                 "stop": ["\n\n\n", "4."],
             },
         }
@@ -1871,54 +1864,57 @@ def analyze_interviewer_questions_ollama(
             f"for session={session_id}, chunk={chunk_index}"
         )
 
-        try:
-            # Preferred: modern Ollama chat API
-            response = requests.post(
-                f"{base_url}/api/chat",
-                json=payload,
-                timeout=Config.OLLAMA_TIMEOUT,
-            )
-            if response.status_code == 404:
-                raise requests.HTTPError("chat endpoint not found (404)", response=response)
-            response.raise_for_status()
-            data = response.json()
+        with _ollama_lock:
+            try:
+                # Preferred: modern Ollama chat API
+                response = requests.post(
+                    f"{base_url}/api/chat",
+                    json=payload,
+                    timeout=Config.OLLAMA_TIMEOUT,
+                )
+                if response.status_code == 404:
+                    raise requests.HTTPError("chat endpoint not found (404)", response=response)
+                response.raise_for_status()
+                data = response.json()
 
-            # Ollama chat API returns {"message": {"role": "assistant", "content": "..."}}
-            raw_text = ""
-            if isinstance(data, Dict):
-                msg = data.get("message") or {}
-                raw_text = (msg.get("content") or "").strip()
+                # Ollama chat API returns {"message": {"role": "assistant", "content": "..."}}
+                raw_text = ""
+                if isinstance(data, Dict):
+                    msg = data.get("message") or {}
+                    raw_text = (msg.get("content") or "").strip()
 
-        except requests.HTTPError as http_err:
-            # Fallback: if /api/chat fails for any reason (404, 500, etc.),
-            # try the simpler /api/generate endpoint with a single prompt.
-            status = http_err.response.status_code if http_err.response is not None else None
-            logger.warning(
-                f"[OllamaInterviewer] /api/chat failed with status={status}, "
-                "falling back to /api/generate"
-            )
+            except requests.HTTPError as http_err:
+                # Fallback: if /api/chat fails for any reason (404, 500, etc.),
+                # try the simpler /api/generate endpoint with a single prompt.
+                status = http_err.response.status_code if http_err.response is not None else None
+                logger.warning(
+                    f"[OllamaInterviewer] /api/chat failed with status={status}, "
+                    "falling back to /api/generate"
+                )
 
-            generate_payload = {
-                "model": model_name,
-                "prompt": system_prompt + "\n\n" + user_prompt,
-                "stream": False,
-                "options": {
-                    "temperature": 0.45,
-                    "num_predict": 350,
-                    "stop": ["\n\n\n", "4."],
-                },
-            }
+                generate_payload = {
+                    "model": model_name,
+                    "prompt": system_prompt + "\n\n" + user_prompt,
+                    "stream": False,
+                    "options": {
+                        "temperature": 0.45,
+                        "num_predict": 200,
+                        "num_ctx": 1024,
+                        "num_thread": 4,
+                        "stop": ["\n\n\n", "4."],
+                    },
+                }
 
-            response = requests.post(
-                f"{base_url}/api/generate",
-                json=generate_payload,
-                timeout=Config.OLLAMA_TIMEOUT,
-            )
-            response.raise_for_status()
-            data = response.json()
+                response = requests.post(
+                    f"{base_url}/api/generate",
+                    json=generate_payload,
+                    timeout=Config.OLLAMA_TIMEOUT,
+                )
+                response.raise_for_status()
+                data = response.json()
 
-            # /api/generate returns {"response": "..."} (non‑streaming)
-            raw_text = (data.get("response") or "").strip()
+                # /api/generate returns {"response": "..."} (non‑streaming)
+                raw_text = (data.get("response") or "").strip()
 
         if not raw_text:
             raise ValueError("Empty response from Ollama interviewer model")
@@ -2194,16 +2190,9 @@ MODEL_REGISTRY = {
         "data_type": "audio",  # Doesn't actually use audio_bytes, but needs a value
         "depends_on": ["whisper", "vocaltone"],  # Runs after whisper and vocaltone
     },
-    "interviewer_ollama": {
-        "function": analyze_interviewer_questions_ollama,
-        "data_type": "audio",  # Doesn't actually use audio_bytes directly
-        "depends_on": [
-            "whisper",
-            "mediapipe",
-            "vocaltone",
-            "clifton_fusion",
-        ],  # Runs after all four base models
-    },
+    # interviewer_ollama is intentionally excluded from MODEL_REGISTRY — it runs as a
+    # background thread in chunk_processor.py after the core models complete, so it does
+    # not block chunk-to-chunk processing.
 }
 
 
@@ -2212,7 +2201,7 @@ def run_parallel_analysis(
     audio_bytes: bytes,
     session_id: str,
     chunk_index: int,
-    max_workers: int = None,
+    max_workers: int = None,  # kept for API compatibility, unused (tpool auto-scales)
     timeout: int = 300,
 ) -> Dict:
     """
@@ -2258,50 +2247,41 @@ def run_parallel_analysis(
     logger.debug(f"Independent models: {list(independent_models.keys())}")
     logger.debug(f"Dependent models: {list(dependent_models.keys())}")
 
-    # Phase 2: Run independent models in parallel
-    if max_workers is None:
-        max_workers = len(independent_models)
-        logger.debug(f"Auto-scaled max_workers to {max_workers} (independent models)")
+    # Phase 2: Run independent models in parallel using unpatched OS threads.
+    # We cannot use concurrent.futures.Future (its Condition uses the monkey-patched
+    # threading.Condition which deadlocks inside a tpool thread) nor eventlet.spawn
+    # (its semaphore can't cross OS thread boundaries). Instead each model thread
+    # writes its result into a plain dict protected by an unpatched Lock; the caller
+    # then joins each thread sequentially (join() on an unpatched Thread is safe).
+    thread_results = {}
+    threads = {}
 
-    with ThreadPoolExecutor(max_workers=max_workers) as executor:
-        futures = {}
-        for model_name, model_config in independent_models.items():
-            func = model_config["function"]
-            data_type = model_config["data_type"]
+    for model_name, model_config in independent_models.items():
+        func = model_config["function"]
+        data_bytes = audio_bytes if model_config["data_type"] == "audio" else video_bytes
 
-            # Select the correct data bytes based on model's data_type
-            data_bytes = audio_bytes if data_type == "audio" else video_bytes
-
-            futures[model_name] = executor.submit(
-                func, data_bytes, session_id, chunk_index
-            )
-
-        # Collect independent results
-        for name, future in futures.items():
+        def _run(fn=func, db=data_bytes, mn=model_name):
             try:
-                result = future.result(timeout=timeout)
-                results[name] = result
+                thread_results[mn] = fn(db, session_id, chunk_index)
+            except Exception as exc:
+                thread_results[mn] = {"error": str(exc)}
 
-                # Log success or error
-                if "error" in result:
-                    logger.warning(
-                        f"[{name}] Failed for chunk {session_id}:{chunk_index}: {result['error']}"
-                    )
-                else:
-                    logger.debug(
-                        f"[{name}] Succeeded for chunk {session_id}:{chunk_index}"
-                    )
+        t = _orig_threading.Thread(target=_run, daemon=True)
+        threads[model_name] = t
+        t.start()
 
-            except TimeoutError:
-                error_msg = f"Timeout after {timeout}s"
-                logger.error(f"[{name}] Timeout for chunk {session_id}:{chunk_index}")
-                results[name] = {"error": error_msg}
+    for name, t in threads.items():
+        t.join(timeout=timeout)
+        if t.is_alive():
+            thread_results[name] = {"error": f"Timeout after {timeout}s"}
+            logger.error(f"[{name}] Timeout for chunk {session_id}:{chunk_index}")
 
-            except Exception as e:
-                logger.error(
-                    f"[{name}] Exception for chunk {session_id}:{chunk_index}: {e}"
-                )
-                results[name] = {"error": str(e)}
+    for name, result in thread_results.items():
+        results[name] = result
+        if "error" in result:
+            logger.warning(f"[{name}] Failed for chunk {session_id}:{chunk_index}: {result['error']}")
+        else:
+            logger.debug(f"[{name}] Succeeded for chunk {session_id}:{chunk_index}")
 
     # Phase 3: Run dependent models sequentially
     for model_name, model_config in dependent_models.items():

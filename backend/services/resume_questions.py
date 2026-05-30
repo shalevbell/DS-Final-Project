@@ -3,7 +3,7 @@ Resume-based warmup question generator.
 
 Extracts text from a PDF resume and uses a lightweight Ollama model to generate
 5 general interview starter questions. Questions are streamed one at a time every
-10 seconds to fill the gap before the first video chunk completes processing.
+6 seconds to fill the gap before the first video chunk completes processing.
 """
 
 import base64
@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 
 _MAX_RESUME_CHARS = 3000
 _QUESTIONS_TO_GENERATE = 5
-_STREAM_INTERVAL_SECONDS = 10
+_STREAM_INTERVAL_SECONDS = 2
 
 
 def extract_pdf_text(pdf_bytes: bytes) -> str:

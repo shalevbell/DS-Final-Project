@@ -70,8 +70,8 @@ def preload_mediapipe_models() -> bool:
     """
     Preload MediaPipe models at startup.
 
-    Downloads models from Google Storage if needed and initializes landmarkers.
-    Sets analyze_video_mediapipe._landmarkers attribute.
+    Downloads model files from Google Storage if needed.
+    Sets analyze_video_mediapipe._models_downloaded flag; landmarkers are created per-chunk.
 
     Returns:
         bool: True if successful, False otherwise
@@ -98,56 +98,12 @@ def preload_mediapipe_models() -> bool:
             if not _download_mediapipe_model(model_name, url, models_dir):
                 raise RuntimeError(f'Failed to download {model_name}')
 
-        # Initialize landmarkers
-        base_options_face = mp.tasks.BaseOptions(
-            model_asset_path=str(models_dir / Config.MEDIAPIPE_FACE_MODEL)
-        )
-        base_options_pose = mp.tasks.BaseOptions(
-            model_asset_path=str(models_dir / Config.MEDIAPIPE_POSE_MODEL)
-        )
-        base_options_hand = mp.tasks.BaseOptions(
-            model_asset_path=str(models_dir / Config.MEDIAPIPE_HAND_MODEL)
-        )
+        # Mark model files as downloaded so analyze_video_mediapipe skips re-download.
+        # Landmarkers are NOT instantiated here because VIDEO mode landmarkers are stateful
+        # and not safe to share across concurrent chunk invocations — each call creates its own.
+        analyze_video_mediapipe._models_downloaded = True
 
-        face_options = mp.tasks.vision.FaceLandmarkerOptions(
-            base_options=base_options_face,
-            running_mode=mp.tasks.vision.RunningMode.IMAGE,
-            num_faces=1,
-            min_face_detection_confidence=Config.MEDIAPIPE_FACE_MIN_DETECTION_CONFIDENCE,
-            min_face_presence_confidence=Config.MEDIAPIPE_FACE_MIN_PRESENCE_CONFIDENCE,
-            min_tracking_confidence=Config.MEDIAPIPE_FACE_MIN_TRACKING_CONFIDENCE
-        )
-
-        pose_options = mp.tasks.vision.PoseLandmarkerOptions(
-            base_options=base_options_pose,
-            running_mode=mp.tasks.vision.RunningMode.IMAGE,
-            min_pose_detection_confidence=Config.MEDIAPIPE_POSE_MIN_DETECTION_CONFIDENCE,
-            min_pose_presence_confidence=Config.MEDIAPIPE_POSE_MIN_PRESENCE_CONFIDENCE,
-            min_tracking_confidence=Config.MEDIAPIPE_POSE_MIN_TRACKING_CONFIDENCE
-        )
-
-        hand_options = mp.tasks.vision.HandLandmarkerOptions(
-            base_options=base_options_hand,
-            running_mode=mp.tasks.vision.RunningMode.IMAGE,
-            num_hands=2,
-            min_hand_detection_confidence=Config.MEDIAPIPE_HAND_MIN_DETECTION_CONFIDENCE,
-            min_hand_presence_confidence=Config.MEDIAPIPE_HAND_MIN_PRESENCE_CONFIDENCE,
-            min_tracking_confidence=Config.MEDIAPIPE_HAND_MIN_TRACKING_CONFIDENCE
-        )
-
-        # Create landmarkers
-        face_landmarker = mp.tasks.vision.FaceLandmarker.create_from_options(face_options)
-        pose_landmarker = mp.tasks.vision.PoseLandmarker.create_from_options(pose_options)
-        hand_landmarker = mp.tasks.vision.HandLandmarker.create_from_options(hand_options)
-
-        # Set as function attribute (same pattern as lazy loading)
-        analyze_video_mediapipe._landmarkers = {
-            'face': face_landmarker,
-            'pose': pose_landmarker,
-            'hand': hand_landmarker
-        }
-
-        logger.info('[ModelLoader] MediaPipe models preloaded successfully')
+        logger.info('[ModelLoader] MediaPipe model files ready (landmarkers created per-chunk)')
         _preload_status['mediapipe']['ready'] = True
         _preload_status['mediapipe']['loading'] = False
         return True

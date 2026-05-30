@@ -22,7 +22,7 @@ class Config:
     CORS_ORIGINS = "*"
 
     # Chunk processing configuration
-    PROCESSING_MAX_WORKERS = int(os.getenv("PROCESSING_MAX_WORKERS", "3"))
+    PROCESSING_MAX_WORKERS = int(os.getenv("PROCESSING_MAX_WORKERS", "1"))
     PROCESSING_QUEUE_SIZE = int(os.getenv("PROCESSING_QUEUE_SIZE", "100"))
     PROCESSING_RETRY_ATTEMPTS = int(os.getenv("PROCESSING_RETRY_ATTEMPTS", "3"))
     PROCESSING_RETRY_DELAY = int(os.getenv("PROCESSING_RETRY_DELAY", "5"))  # seconds
@@ -32,7 +32,7 @@ class Config:
     PUBSUB_RECONNECT_DELAY = int(os.getenv("PUBSUB_RECONNECT_DELAY", "5"))  # seconds
 
     # Chunk configuration
-    CHUNK_DURATION_MS = 30000  # Video chunk duration in milliseconds (30 seconds)
+    CHUNK_DURATION_MS = int(os.getenv("CHUNK_DURATION_MS", "20000"))  # Video chunk duration in milliseconds
 
     # Whisper model configuration
     WHISPER_MODEL_NAME = os.getenv("WHISPER_MODEL_NAME", "base.en")
@@ -46,7 +46,7 @@ class Config:
         "MEDIAPIPE_POSE_MODEL", "pose_landmarker_lite.task"
     )
     MEDIAPIPE_HAND_MODEL = os.getenv("MEDIAPIPE_HAND_MODEL", "hand_landmarker.task")
-    MEDIAPIPE_FRAME_SAMPLE_RATE = int(os.getenv("MEDIAPIPE_FRAME_SAMPLE_RATE", "2"))
+    MEDIAPIPE_FRAME_SAMPLE_RATE = int(os.getenv("MEDIAPIPE_FRAME_SAMPLE_RATE", "5"))
 
     # MediaPipe detection thresholdsj
     MEDIAPIPE_FACE_MIN_DETECTION_CONFIDENCE = float(
@@ -100,7 +100,7 @@ class Config:
     OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://ollama:11434")
     # Name of the Ollama model to use (e.g. llama3, mistral, phi3:mini, gemma3:270m, etc.)
     # Default to the very small \"gemma3:270m\" model to fit low-RAM environments.
-    OLLAMA_MODEL_NAME = os.getenv("OLLAMA_MODEL_NAME", "qwen3:0.6b")
+    OLLAMA_MODEL_NAME = os.getenv("OLLAMA_MODEL_NAME", "gemma3:1b")
     # Timeout in seconds for Ollama HTTP requests
     OLLAMA_TIMEOUT = int(os.getenv("OLLAMA_TIMEOUT", "60"))
     # Lightweight model for resume-based warmup questions (qwen2.5:0.5b is ~352MB)
