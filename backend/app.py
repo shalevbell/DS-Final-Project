@@ -28,7 +28,7 @@ from services.connection_manager import (
 )
 from routes.http_routes import register_http_routes
 from routes.websocket_handlers import register_socketio_handlers
-from services.text_streaming import stream_text
+from services.text_streaming import stream_text, start_emit_worker
 from services.db_service import init_db
 
 # Configure logging
@@ -78,6 +78,9 @@ socketio = SocketIO(
     ping_interval=30,
     ping_timeout=300,
 )
+
+# Start the cross-thread emit worker before anything calls stream_text
+start_emit_worker(socketio)
 
 # Initialize services
 redis_client = get_redis_client()

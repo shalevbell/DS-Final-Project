@@ -8,10 +8,33 @@ via WebSocket, independent of model-specific logic.
 import logging
 from datetime import datetime
 from typing import Dict, Optional
+import eventlet.patcher as _ep
 
-import eventlet.hubs
+# Use the real (unpatched) Queue so OS threads can put() without deadlocking.
+_real_queue = _ep.original('queue')
+_emit_queue = _real_queue.Queue()
 
 logger = logging.getLogger(__name__)
+
+
+def start_emit_worker(socketio):
+    """
+    Drain _emit_queue in a greenthread on the main eventlet hub.
+    Must be called once from app.py after socketio is created.
+    """
+    import eventlet
+
+    def _worker():
+        while True:
+            try:
+                payload = _emit_queue.get(timeout=1)
+                socketio.emit('text_stream', payload)
+            except _real_queue.Empty:
+                eventlet.sleep(0)
+            except Exception as e:
+                logger.error(f'[TextStream] emit worker error: {e}')
+
+    eventlet.spawn(_worker)
 
 
 def stream_text(
@@ -32,16 +55,13 @@ def stream_text(
         if metadata:
             payload['metadata'] = metadata
 
-        # schedule_call_global dispatches the emit onto the eventlet hub's OS
-        # thread, which is safe to call from any thread including tpool workers.
-        eventlet.hubs.get_hub().schedule_call_global(
-            0, socketio.emit, 'text_stream', payload
-        )
+        # put() is safe from any OS thread; the greenthread worker emits it.
+        _emit_queue.put(payload)
 
         logger.debug(
-            f'[TextStream] Emitted text ({len(text)} chars) '
+            f'[TextStream] Queued text ({len(text)} chars) '
             f'session={session_id}, metadata={metadata}'
         )
 
     except Exception as e:
-        logger.error(f'[TextStream] Error streaming text: {e}')
+        logger.error(f'[TextStream] Error queueing text: {e}')
