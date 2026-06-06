@@ -27,12 +27,13 @@ def start_emit_worker(socketio):
     def _worker():
         while True:
             try:
-                payload = _emit_queue.get(timeout=1)
+                payload = _emit_queue.get_nowait()
                 socketio.emit('text_stream', payload)
             except _real_queue.Empty:
-                eventlet.sleep(0)
+                eventlet.sleep(0.05)
             except Exception as e:
                 logger.error(f'[TextStream] emit worker error: {e}')
+                eventlet.sleep(0)
 
     eventlet.spawn(_worker)
 
