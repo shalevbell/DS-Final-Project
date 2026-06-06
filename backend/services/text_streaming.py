@@ -8,7 +8,6 @@ via WebSocket, independent of model-specific logic.
 import logging
 from datetime import datetime
 from typing import Dict, Optional
-import eventlet
 
 logger = logging.getLogger(__name__)
 
@@ -57,9 +56,7 @@ def stream_text(
         if metadata:
             payload['metadata'] = metadata
 
-        # Use eventlet.spawn for thread-safe emission from worker threads
-        # This ensures the emission happens on the main greenthread
-        eventlet.spawn(lambda: socketio.emit('text_stream', payload))
+        socketio.emit('text_stream', payload)
 
         logger.debug(
             f'[TextStream] Emitted text ({len(text)} chars) '
