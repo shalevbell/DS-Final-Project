@@ -143,9 +143,10 @@ class VideoApp {
                 // Try socket first (works for same-tab navigation)
                 this.sendWebSocketMessage('stream_ended', { sessionId: this.sessionId });
                 // sendBeacon survives page unload reliably
-                const { protocol, hostname } = window.location;
+                const { protocol, hostname, port } = window.location;
+                const _origin = port ? `${protocol}//${hostname}:${port}` : `${protocol}//${hostname}`;
                 navigator.sendBeacon(
-                    `${protocol}//${hostname}:5555/api/sessions/${encodeURIComponent(this.sessionId)}/complete`
+                    `${_origin}/api/sessions/${encodeURIComponent(this.sessionId)}/complete`
                 );
             }
         });
@@ -163,10 +164,10 @@ class VideoApp {
 
     initializeWebSocket() {
         if (typeof io === 'undefined') return;
-        const { protocol, hostname } = window.location;
-        const backendPort = '5555';  // Backend runs on port 5555
+        const { protocol, hostname, port } = window.location;
+        const origin = port ? `${protocol}//${hostname}:${port}` : `${protocol}//${hostname}`;
         // Long timeouts so connection survives slow model runs (2–3 min per chunk)
-        this.socket = io(`${protocol}//${hostname}:${backendPort}`, {
+        this.socket = io(origin, {
             transports: ['websocket'],
             reconnection: true,
             reconnectionDelay: 1000,
@@ -751,9 +752,9 @@ class VideoApp {
      */
     async checkModelStatus() {
         try {
-            const { protocol, hostname } = window.location;
-            const backendPort = '5555';
-            const response = await fetch(`${protocol}//${hostname}:${backendPort}/api/models/status`);
+            const { protocol, hostname, port } = window.location;
+            const origin = port ? `${protocol}//${hostname}:${port}` : `${protocol}//${hostname}`;
+            const response = await fetch(`${origin}/api/models/status`);
 
             if (!response.ok) {
                 throw new Error(`HTTP error! status: ${response.status}`);

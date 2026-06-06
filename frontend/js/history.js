@@ -23,8 +23,8 @@ class HistoryApp {
         this.currentDetailCandidateName = null;
         this.currentDetailStartedAt = null;
 
-        const { protocol, hostname } = window.location;
-        this.apiBase = `${protocol}//${hostname}:5555`;
+        const { protocol, hostname, port } = window.location;
+        this.apiBase = port ? `${protocol}//${hostname}:${port}` : `${protocol}//${hostname}`;
 
         this._bindEvents();
         // Defer data loading until after the page has painted so the
