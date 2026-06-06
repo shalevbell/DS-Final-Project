@@ -9,6 +9,8 @@ import logging
 from datetime import datetime
 from typing import Dict, Optional
 
+import eventlet.hubs
+
 logger = logging.getLogger(__name__)
 
 
@@ -18,32 +20,6 @@ def stream_text(
     session_id: Optional[str] = None,
     metadata: Optional[Dict] = None
 ):
-    """
-    Stream arbitrary text to frontend via WebSocket.
-
-    This function provides a generic way to stream any text content to the
-    frontend, with optional context information. The text will be displayed
-    using the frontend's TextStreamer class with letter-by-letter animation.
-
-    Args:
-        socketio: SocketIO instance for emitting events
-        text: Text content to stream (can be any string)
-        session_id: Optional session identifier for tracking
-        metadata: Optional metadata dictionary for context
-                 (e.g., {'source': 'whisper', 'chunk': 5, 'model': 'gpt-4'})
-
-    Example:
-        # Stream a simple message
-        stream_text(socketio, "Processing complete!")
-
-        # Stream with context
-        stream_text(
-            socketio,
-            "Transcription: Hello world",
-            session_id="session_123",
-            metadata={'source': 'whisper', 'chunk': 5}
-        )
-    """
     try:
         payload = {
             'text': text,
@@ -56,7 +32,11 @@ def stream_text(
         if metadata:
             payload['metadata'] = metadata
 
-        socketio.emit('text_stream', payload)
+        # schedule_call_global dispatches the emit onto the eventlet hub's OS
+        # thread, which is safe to call from any thread including tpool workers.
+        eventlet.hubs.get_hub().schedule_call_global(
+            0, socketio.emit, 'text_stream', payload
+        )
 
         logger.debug(
             f'[TextStream] Emitted text ({len(text)} chars) '
