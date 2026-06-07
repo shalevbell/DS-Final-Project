@@ -98,10 +98,23 @@ class VideoApp {
         this.targetRoleInput = document.getElementById('target-role');
         this.interviewRequirementsInput = document.getElementById('interview-requirements');
         this.reqCharCount = document.getElementById('req-char-count');
-        this.engagementScore = document.getElementById('engagement-score');
-        this.postureStability = document.getElementById('posture-stability');
-        this.voicePitch = document.getElementById('voice-pitch');
-        this.voiceTempo = document.getElementById('voice-tempo');
+        this.stressFaces = document.getElementById('stress-faces');
+        this.stressMeterPointer = document.getElementById('stress-meter-pointer');
+        this.stressLevelValue = document.getElementById('stress-level-value');
+        this.stressLevelDesc = document.getElementById('stress-level-desc');
+        this.eyeContactIndicator = document.getElementById('eye-contact-indicator');
+        this.eyeContactLabel = document.getElementById('eye-contact-label');
+        this.bodyStabilityIndicator = document.getElementById('body-stability-indicator');
+        this.bodyStabilityLabel = document.getElementById('body-stability-label');
+        this.voiceLoudnessLight = document.getElementById('voice-loudness-light');
+        this.voiceLoudnessValue = document.getElementById('voice-loudness-value');
+        this.voiceLoudnessDesc = document.getElementById('voice-loudness-desc');
+        this.voiceFlowLight = document.getElementById('voice-flow-light');
+        this.voiceFlowValue = document.getElementById('voice-flow-value');
+        this.voiceFlowDesc = document.getElementById('voice-flow-desc');
+        this.voiceConfidenceLight = document.getElementById('voice-confidence-light');
+        this.voiceConfidenceValue = document.getElementById('voice-confidence-value');
+        this.voiceConfidenceDesc = document.getElementById('voice-confidence-desc');
         this.sentimentAlert = document.getElementById('sentiment-alert');
         this.localStream = null;
         this.mediaRecorder = null;
@@ -581,17 +594,11 @@ class VideoApp {
         const lowerText = (text || '').toLowerCase();
         this.tryUpdateMetricsFromText(text);
 
-        if (metadata && typeof metadata.engagement === 'number' && this.engagementScore) {
-            this.engagementScore.textContent = `${Math.max(0, Math.min(100, Math.round(metadata.engagement)))}%`;
+        if (metadata && metadata.source === 'mediapipe') {
+            this.updateMediapipeInsights(metadata);
         }
-        if (metadata && typeof metadata.posture === 'number' && this.postureStability) {
-            this.postureStability.textContent = `${Math.max(0, Math.min(100, Math.round(metadata.posture)))}%`;
-        }
-        if (metadata && typeof metadata.pitch_hz === 'number' && this.voicePitch) {
-            this.voicePitch.textContent = `${Math.round(metadata.pitch_hz)} Hz`;
-        }
-        if (metadata && typeof metadata.tempo_bpm === 'number' && this.voiceTempo) {
-            this.voiceTempo.textContent = `${Math.round(metadata.tempo_bpm)} BPM`;
+        if (metadata && metadata.source === 'vocaltone') {
+            this.updateVoiceProfileFromVocaltone(metadata);
         }
 
         if (this.sentimentAlert) {
@@ -615,18 +622,8 @@ class VideoApp {
         const mediapipe = results.mediapipe || {};
         const vocaltone = results.vocaltone || {};
 
-        if (typeof mediapipe.engagement_score === 'number' && this.engagementScore) {
-            this.engagementScore.textContent = `${Math.round(Math.max(0, Math.min(1, mediapipe.engagement_score)) * 100)}%`;
-        }
-        if (typeof mediapipe.posture_score === 'number' && this.postureStability) {
-            this.postureStability.textContent = `${Math.round(Math.max(0, Math.min(1, mediapipe.posture_score)) * 100)}%`;
-        }
-        if (typeof vocaltone.pitch_mean === 'number' && this.voicePitch) {
-            this.voicePitch.textContent = `${Math.round(vocaltone.pitch_mean)} Hz`;
-        }
-        if (typeof vocaltone.tempo === 'number' && this.voiceTempo) {
-            this.voiceTempo.textContent = `${Math.round(vocaltone.tempo)} BPM`;
-        }
+        this.updateMediapipeInsights(mediapipe);
+        this.updateVoiceProfileFromVocaltone(vocaltone);
 
         const emotion = (mediapipe.dominant_emotion || vocaltone.emotion || '').toLowerCase();
         if (this.sentimentAlert && emotion) {
@@ -647,30 +644,176 @@ class VideoApp {
     tryUpdateMetricsFromText(text) {
         if (!text || typeof text !== 'string') return;
 
-        const engagementMatch = text.match(/engagement:\s*(\d+)%/i);
-        const postureMatch = text.match(/posture:\s*(\d+)%/i);
+        const stressMatch = text.match(/stress:\s*(\d+)%/i);
+        const eyeContactMatch = text.match(/eyecontact:\s*(yes|no)/i);
+        const bodyStableMatch = text.match(/bodystable:\s*(yes|no)/i);
         const pitchMatch = text.match(/pitch:\s*(\d+(?:\.\d+)?)\s*hz/i);
         const tempoMatch = text.match(/tempo:\s*(\d+(?:\.\d+)?)\s*bpm/i);
 
-        if (engagementMatch && this.engagementScore) {
-            this.engagementScore.textContent = `${engagementMatch[1]}%`;
+        if (stressMatch || eyeContactMatch || bodyStableMatch) {
+            const mediapipeData = {};
+            if (stressMatch) mediapipeData.stress_level = Number(stressMatch[1]);
+            if (eyeContactMatch) mediapipeData.eye_contact = eyeContactMatch[1].toLowerCase() === 'yes';
+            if (bodyStableMatch) mediapipeData.body_stable = bodyStableMatch[1].toLowerCase() === 'yes';
+            this.updateMediapipeInsights(mediapipeData);
         }
-        if (postureMatch && this.postureStability) {
-            this.postureStability.textContent = `${postureMatch[1]}%`;
-        }
-        if (pitchMatch && this.voicePitch) {
-            this.voicePitch.textContent = `${Math.round(Number(pitchMatch[1]))} Hz`;
-        }
-        if (tempoMatch && this.voiceTempo) {
-            this.voiceTempo.textContent = `${Math.round(Number(tempoMatch[1]))} BPM`;
+
+        if (pitchMatch || tempoMatch) {
+            const confidenceMatch = text.match(/\((\d+)%\)/i);
+            const vocaltoneData = {};
+            if (tempoMatch) vocaltoneData.tempo_bpm = Number(tempoMatch[1]);
+            if (confidenceMatch) vocaltoneData.confidence = Number(confidenceMatch[1]) / 100;
+            this.updateVoiceProfileFromVocaltone(vocaltoneData);
         }
     }
 
+    updateMediapipeInsights(data) {
+        if (!data || typeof data !== 'object') return;
+
+        if (typeof data.stress_level === 'number') {
+            const stress = Math.max(0, Math.min(100, Math.round(data.stress_level)));
+            let level = 'neutral';
+            let desc = 'Neutral';
+
+            if (stress <= 25) {
+                level = 'calm';
+                desc = 'Calm';
+            } else if (stress <= 50) {
+                level = 'neutral';
+                desc = 'Mild tension';
+            } else if (stress <= 75) {
+                level = 'tense';
+                desc = 'Elevated stress';
+            } else {
+                level = 'high';
+                desc = 'High stress';
+            }
+
+            if (this.stressFaces) {
+                this.stressFaces.querySelectorAll('.stress-face').forEach((face) => {
+                    face.classList.toggle('active', face.dataset.level === level);
+                });
+            }
+            if (this.stressMeterPointer) {
+                this.stressMeterPointer.style.left = `${stress}%`;
+            }
+            if (this.stressLevelValue) {
+                this.stressLevelValue.textContent = `${stress}%`;
+            }
+            if (this.stressLevelDesc) {
+                this.stressLevelDesc.textContent = desc;
+            }
+        }
+
+        if (typeof data.eye_contact === 'boolean') {
+            this._setStatusIndicator(
+                this.eyeContactIndicator,
+                this.eyeContactLabel,
+                data.eye_contact,
+                'Maintaining eye contact',
+                'Limited eye contact'
+            );
+        }
+
+        if (typeof data.body_stable === 'boolean') {
+            this._setStatusIndicator(
+                this.bodyStabilityIndicator,
+                this.bodyStabilityLabel,
+                data.body_stable,
+                'Stable posture',
+                'Frequent movement'
+            );
+        }
+    }
+
+    _setStatusIndicator(indicatorEl, labelEl, isPositive, yesText, noText) {
+        if (indicatorEl) {
+            indicatorEl.className = `status-indicator ${isPositive ? 'yes' : 'no'}`;
+            indicatorEl.textContent = isPositive ? '✓' : '✕';
+        }
+        if (labelEl) {
+            labelEl.textContent = isPositive ? yesText : noText;
+        }
+    }
+
+    updateVoiceProfileFromVocaltone(data) {
+        if (!data || typeof data !== 'object') return;
+
+        const energy = typeof data.energy_level === 'number' ? data.energy_level : null;
+        const tempo = typeof data.tempo_bpm === 'number'
+            ? data.tempo_bpm
+            : (typeof data.tempo === 'number' ? data.tempo : null);
+        const confidence = typeof data.confidence === 'number' ? data.confidence : null;
+
+        if (energy !== null && energy > 0) {
+            const volumePct = Math.round(Math.min(energy / 0.12, 1) * 100);
+            const state = volumePct < 20 ? 'red' : (volumePct > 75 ? 'yellow' : 'green');
+            const desc = state === 'red' ? 'low' : (state === 'yellow' ? 'elevated' : 'balanced');
+            this._setVoiceProfileCard(
+                this.voiceLoudnessLight,
+                this.voiceLoudnessValue,
+                this.voiceLoudnessDesc,
+                state,
+                `${volumePct}%`,
+                desc
+            );
+        }
+
+        if (tempo !== null && tempo > 0) {
+            const roundedTempo = Math.round(tempo);
+            const state = roundedTempo < 70 ? 'red' : (roundedTempo > 145 ? 'yellow' : 'green');
+            const desc = state === 'red' ? 'slow' : (state === 'yellow' ? 'fast' : 'steady');
+            this._setVoiceProfileCard(
+                this.voiceFlowLight,
+                this.voiceFlowValue,
+                this.voiceFlowDesc,
+                state,
+                `${roundedTempo} BPM`,
+                desc
+            );
+        }
+
+        if (confidence !== null && confidence > 0) {
+            const confidencePct = Math.round(Math.max(0, Math.min(1, confidence)) * 100);
+            const state = confidencePct < 50 ? 'red' : (confidencePct < 75 ? 'yellow' : 'green');
+            const desc = state === 'red' ? 'uncertain' : (state === 'yellow' ? 'moderate' : 'strong');
+            this._setVoiceProfileCard(
+                this.voiceConfidenceLight,
+                this.voiceConfidenceValue,
+                this.voiceConfidenceDesc,
+                state,
+                `${confidencePct}%`,
+                desc
+            );
+        }
+    }
+
+    _setVoiceProfileCard(lightEl, valueEl, descEl, state, valueText, descText) {
+        if (lightEl) lightEl.dataset.state = state;
+        if (valueEl) valueEl.textContent = valueText;
+        if (descEl) descEl.textContent = descText;
+    }
+
     resetLiveMetrics() {
-        if (this.engagementScore) this.engagementScore.textContent = '--%';
-        if (this.postureStability) this.postureStability.textContent = '--%';
-        if (this.voicePitch) this.voicePitch.textContent = '-';
-        if (this.voiceTempo) this.voiceTempo.textContent = '-';
+        if (this.stressFaces) {
+            this.stressFaces.querySelectorAll('.stress-face').forEach((face) => face.classList.remove('active'));
+        }
+        if (this.stressMeterPointer) this.stressMeterPointer.style.left = '0%';
+        if (this.stressLevelValue) this.stressLevelValue.textContent = '--';
+        if (this.stressLevelDesc) this.stressLevelDesc.textContent = 'Waiting for camera...';
+        if (this.eyeContactIndicator) {
+            this.eyeContactIndicator.className = 'status-indicator unknown';
+            this.eyeContactIndicator.textContent = '-';
+        }
+        if (this.eyeContactLabel) this.eyeContactLabel.textContent = 'Waiting for camera...';
+        if (this.bodyStabilityIndicator) {
+            this.bodyStabilityIndicator.className = 'status-indicator unknown';
+            this.bodyStabilityIndicator.textContent = '-';
+        }
+        if (this.bodyStabilityLabel) this.bodyStabilityLabel.textContent = 'Waiting for camera...';
+        this._setVoiceProfileCard(this.voiceLoudnessLight, this.voiceLoudnessValue, this.voiceLoudnessDesc, 'none', '-', '-');
+        this._setVoiceProfileCard(this.voiceFlowLight, this.voiceFlowValue, this.voiceFlowDesc, 'none', '-', '-');
+        this._setVoiceProfileCard(this.voiceConfidenceLight, this.voiceConfidenceValue, this.voiceConfidenceDesc, 'none', '-', '-');
         if (this.sentimentAlert) {
             this.sentimentAlert.className = 'alert-chip neutral';
             this.sentimentAlert.textContent = 'No sentiment alerts';

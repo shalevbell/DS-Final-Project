@@ -864,6 +864,131 @@ def _analyze_face_simple(face_landmarks_list: List) -> Dict:
         }
 
 
+def _detect_eye_contact_frame(face_landmarks_list: List) -> bool:
+    """Return True when the face appears oriented toward the camera."""
+    if not face_landmarks_list or len(face_landmarks_list) == 0:
+        return False
+
+    landmarks = face_landmarks_list[0]
+    try:
+        nose = landmarks[1]
+        left_eye_outer = landmarks[33]
+        right_eye_outer = landmarks[263]
+        left_eye_top = landmarks[159]
+        left_eye_bottom = landmarks[145]
+        right_eye_top = landmarks[386]
+        right_eye_bottom = landmarks[374]
+
+        left_dist = abs(nose.x - left_eye_outer.x)
+        right_dist = abs(right_eye_outer.x - nose.x)
+        head_symmetry = abs(left_dist - right_dist)
+        avg_eye_openness = (
+            abs(left_eye_top.y - left_eye_bottom.y)
+            + abs(right_eye_top.y - right_eye_bottom.y)
+        ) / 2
+
+        centered = 0.25 < nose.x < 0.75
+        facing_camera = head_symmetry < 0.03
+        eyes_open = avg_eye_openness > 0.008
+
+        return centered and facing_camera and eyes_open
+    except Exception:
+        return False
+
+
+def _analyze_eye_contact(all_face_results: List) -> Dict:
+    """Aggregate eye-contact ratio across sampled frames."""
+    if not all_face_results:
+        return {"eye_contact": False, "eye_contact_ratio": 0.0}
+
+    detected_frames = 0
+    contact_frames = 0
+
+    for face_landmarks in all_face_results:
+        if face_landmarks:
+            detected_frames += 1
+            if _detect_eye_contact_frame(face_landmarks):
+                contact_frames += 1
+
+    ratio = contact_frames / detected_frames if detected_frames else 0.0
+    return {
+        "eye_contact": ratio >= 0.5,
+        "eye_contact_ratio": round(ratio, 2),
+    }
+
+
+def _analyze_body_stability(all_pose_results: List) -> Dict:
+    """Estimate fidgeting from pose movement between sampled frames."""
+    keypoints = []
+
+    for pose_landmarks in all_pose_results:
+        if not pose_landmarks:
+            continue
+        pose = pose_landmarks[0]
+        try:
+            nose = pose[0]
+            left_shoulder = pose[11]
+            right_shoulder = pose[12]
+            shoulder_center_x = (left_shoulder.x + right_shoulder.x) / 2
+            shoulder_center_y = (left_shoulder.y + right_shoulder.y) / 2
+            keypoints.append((nose.x, nose.y, shoulder_center_x, shoulder_center_y))
+        except Exception:
+            continue
+
+    if len(keypoints) < 2:
+        return {"body_stable": None, "movement_index": 0.0}
+
+    total_shift = 0.0
+    for i in range(1, len(keypoints)):
+        dx = keypoints[i][0] - keypoints[i - 1][0]
+        dy = keypoints[i][1] - keypoints[i - 1][1]
+        dsx = keypoints[i][2] - keypoints[i - 1][2]
+        dsy = keypoints[i][3] - keypoints[i - 1][3]
+        total_shift += (dx * dx + dy * dy + dsx * dsx + dsy * dsy) ** 0.5
+
+    movement_index = total_shift / (len(keypoints) - 1)
+    return {
+        "body_stable": movement_index < 0.012,
+        "movement_index": round(movement_index, 4),
+    }
+
+
+def _calculate_stress_level(
+    dominant_emotion: str,
+    avg_posture_score: float,
+    eye_contact_ratio: float,
+    body_stable: Optional[bool],
+    hand_gestures: Dict,
+) -> int:
+    """Composite stress score (0=calm, 100=high stress)."""
+    emotion_stress = {
+        "frustrated": 90,
+        "sad": 82,
+        "concerned": 72,
+        "confused": 66,
+        "surprised": 58,
+        "concentrated": 46,
+        "neutral": 34,
+        "engaged": 26,
+        "excited": 22,
+        "happy": 14,
+    }.get(dominant_emotion, 40)
+
+    posture_stress = (1.0 - avg_posture_score) * 100
+    eye_stress = 28 if eye_contact_ratio >= 0.5 else 68
+    movement_stress = 28 if body_stable else 72 if body_stable is False else 45
+    hand_stress = 62 if hand_gestures.get("near_face", 0) > 0 else 22
+
+    stress = (
+        emotion_stress * 0.35
+        + posture_stress * 0.2
+        + eye_stress * 0.15
+        + movement_stress * 0.2
+        + hand_stress * 0.1
+    )
+    return int(max(0, min(100, round(stress))))
+
+
 def _analyze_posture_simple(pose_landmarks_list: List) -> Dict:
     """
     Multi-dimensional posture analysis.
@@ -1271,6 +1396,16 @@ def analyze_video_mediapipe(
         )
         hand_gestures_detected = hand_detected_count > 0
 
+        eye_contact_metrics = _analyze_eye_contact(all_face_results)
+        body_stability_metrics = _analyze_body_stability(all_pose_results)
+        stress_level = _calculate_stress_level(
+            dominant_emotion=dominant_emotion,
+            avg_posture_score=avg_posture_score,
+            eye_contact_ratio=eye_contact_metrics["eye_contact_ratio"],
+            body_stable=body_stability_metrics["body_stable"],
+            hand_gestures=hand_gestures,
+        )
+
         # Log analysis results
         logger.info(
             f"[MediaPipe] Analysis: emotion={dominant_emotion} (conf={avg_emotion_confidence:.2f}), "
@@ -1328,6 +1463,11 @@ def analyze_video_mediapipe(
             "facial_landmarks_detected": len(face_analyses) > 0,
             "pose_landmarks_detected": len(posture_scores) > 0,
             "frames_analyzed": frames_analyzed,
+            "stress_level": stress_level,
+            "eye_contact": eye_contact_metrics["eye_contact"],
+            "eye_contact_ratio": eye_contact_metrics["eye_contact_ratio"],
+            "body_stable": body_stability_metrics["body_stable"],
+            "movement_index": body_stability_metrics["movement_index"],
             "processing_time_ms": processing_time,
         }
 
@@ -1341,10 +1481,27 @@ def analyze_video_mediapipe(
         from services.text_streaming import stream_text
         from app import socketio
 
-        text = f"{dominant_emotion} | Posture: {avg_posture_score:.0%} | Engagement: {engagement_score:.0%}"
-        stream_text(
-            socketio, text, session_id, {"source": "mediapipe", "chunk": chunk_index}
+        body_stable = body_stability_metrics["body_stable"]
+        if body_stable is None:
+            body_stable_text = "unknown"
+        else:
+            body_stable_text = "yes" if body_stable else "no"
+
+        text = (
+            f"{dominant_emotion} | Stress: {stress_level}% | "
+            f"EyeContact: {'yes' if eye_contact_metrics['eye_contact'] else 'no'} | "
+            f"BodyStable: {body_stable_text}"
         )
+        stream_metadata = {
+            "source": "mediapipe",
+            "chunk": chunk_index,
+            "stress_level": stress_level,
+            "eye_contact": eye_contact_metrics["eye_contact"],
+        }
+        if body_stable is not None:
+            stream_metadata["body_stable"] = body_stable
+
+        stream_text(socketio, text, session_id, stream_metadata)
 
         return result
 
@@ -1532,7 +1689,17 @@ def analyze_vocal_tone(audio_bytes: bytes, session_id: str, chunk_index: int) ->
 
         text = f"{predicted_emotion} ({confidence:.0%}) | Pitch: {pitch_mean:.0f}Hz | Tempo: {tempo_value:.0f}BPM"
         stream_text(
-            socketio, text, session_id, {"source": "vocaltone", "chunk": chunk_index}
+            socketio,
+            text,
+            session_id,
+            {
+                "source": "vocaltone",
+                "chunk": chunk_index,
+                "pitch_hz": pitch_mean,
+                "tempo_bpm": tempo_value,
+                "energy_level": energy,
+                "confidence": float(confidence),
+            },
         )
 
         return result
