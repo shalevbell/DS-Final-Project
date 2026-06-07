@@ -1,11 +1,26 @@
 services:
+  nginx:
+    image: nginx:alpine
+    container_name: nginx
+    ports:
+      - "443:443"
+      - "80:80"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./nginx/entrypoint.sh:/entrypoint.sh:ro
+      - nginx_certs:/etc/nginx/certs
+    entrypoint: ["/bin/sh", "/entrypoint.sh"]
+    depends_on:
+      - backend
+    restart: unless-stopped
+    networks:
+      - helperviewer_network
+
   backend:
     build:
       context: ./backend
       dockerfile: Dockerfile
     container_name: backend
-    ports:
-      - "5555:5000"
     environment:
       DATABASE_URL: postgresql://postgres:postgres@postgres:5432/Helperviewer_db
       REDIS_URL: redis://redis:6379/0
@@ -16,6 +31,8 @@ services:
       GLOG_minloglevel: "3"
       GLOG_logtostderr: "0"
       ONNXRUNTIME_SEVERITY_LEVEL: "4"
+      OLLAMA_RESUME_MODEL_NAME: "qwen2.5:0.5b"
+      OLLAMA_TIMEOUT: "180"
       # Training mode: Set to "1" to enable dataset download (only needed for model training)
       # Leave at "0" for inference-only mode (saves startup time and bandwidth)
       ENABLE_TRAINING: "0"
@@ -44,7 +61,7 @@ services:
       ollama:
         condition: service_started
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:5000/api/health"]
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:5000/api/health')"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -116,3 +133,5 @@ volumes:
     name: helperviewer_dataset_data
   ollama_models:
     name: helperviewer_ollama_models
+  nginx_certs:
+    name: helperviewer_nginx_certs
