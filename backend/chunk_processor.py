@@ -8,7 +8,6 @@ import logging
 import json
 import time
 import threading
-from concurrent.futures import ThreadPoolExecutor
 from typing import Optional, Dict, Set
 from datetime import datetime
 from collections import defaultdict
@@ -72,9 +71,6 @@ class ChunkProcessor:
 
         # Initialize processing queue
         self.queue = ProcessingQueue(maxsize=queue_size)
-
-        # Initialize thread pool for chunk processing
-        self.executor = ThreadPoolExecutor(max_workers=max_workers)
 
         # Shutdown event
         self.shutdown_event = threading.Event()
@@ -234,8 +230,9 @@ class ChunkProcessor:
 
                 session_id, chunk_index = result
 
-                # Submit to thread pool for processing
-                self.executor.submit(self._process_chunk_with_retry, session_id, chunk_index)
+                # Spawn a greenthread for processing; heavy CPU work inside
+                # escapes to real OS threads via eventlet.tpool.execute()
+                eventlet.spawn(self._process_chunk_with_retry, session_id, chunk_index)
 
             except Exception as e:
                 logger.error(f'Queue processor error: {e}')
@@ -270,7 +267,7 @@ class ChunkProcessor:
                     f'Retrying chunk {session_id}:{chunk_index} after {delay}s '
                     f'(attempt {attempt}/{max_attempts}): {e}'
                 )
-                time.sleep(delay)
+                eventlet.sleep(delay)
                 self._process_chunk_with_retry(session_id, chunk_index, attempt + 1, max_attempts)
             else:
                 logger.error(f'Max retries exceeded for chunk {session_id}:{chunk_index}')
@@ -591,10 +588,6 @@ class ChunkProcessor:
                 self.pubsub.close()
             except Exception as e:
                 logger.warning(f'Error closing PUBSUB: {e}')
-
-        # Shutdown thread pool (wait for active chunks to complete)
-        logger.info('Waiting for active chunks to complete...')
-        self.executor.shutdown(wait=True, cancel_futures=False)
 
         # Close Redis connections
         if self.redis_pubsub_client:
