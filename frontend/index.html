@@ -9,7 +9,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Figtree:wght@400;500;600&family=Syne:wght@700;800&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="css/style.css?v=10">
+    <link rel="stylesheet" href="css/style.css?v=11">
 </head>
 <body>
     <div class="app-shell">
@@ -80,6 +80,15 @@
                     <div class="panel">
                         <div class="panel-title">Interview Insights Dashboard</div>
 
+                        <div class="sub-panel">
+                            <h3>Live Question Generation</h3>
+                            <div class="output-content" id="output-content">
+                                <div class="output-placeholder">
+                                    Interview questions and AI insights will appear here after you start the camera...
+                                </div>
+                            </div>
+                        </div>
+
                         <div class="insight-grid">
                             <div class="insight-card">
                                 <p class="insight-label">Stress Level</p>
@@ -105,15 +114,6 @@
                                 <p class="insight-label">Body Stability</p>
                                 <div id="body-stability-indicator" class="status-indicator unknown" aria-label="Body stability status">-</div>
                                 <p id="body-stability-label" class="insight-caption">Waiting for camera...</p>
-                            </div>
-                        </div>
-
-                        <div class="sub-panel">
-                            <h3>Live Question Generation</h3>
-                            <div class="output-content" id="output-content">
-                                <div class="output-placeholder">
-                                    Interview questions and AI insights will appear here after you start the camera...
-                                </div>
                             </div>
                         </div>
 
