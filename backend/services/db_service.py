@@ -50,6 +50,13 @@ CREATE INDEX IF NOT EXISTS idx_chunk_results_session_id
     ON chunk_results(session_id);
 """
 
+MIGRATIONS = """
+ALTER TABLE sessions ADD COLUMN IF NOT EXISTS target_role VARCHAR(255);
+ALTER TABLE sessions ADD COLUMN IF NOT EXISTS interview_requirements TEXT;
+ALTER TABLE sessions ADD COLUMN IF NOT EXISTS resume_filename VARCHAR(512);
+ALTER TABLE sessions ADD COLUMN IF NOT EXISTS conclusion JSONB;
+"""
+
 
 def init_db(database_url: str) -> None:
     """
@@ -84,6 +91,7 @@ def _create_tables() -> None:
     with _get_connection() as conn:
         with conn.cursor() as cur:
             cur.execute(DDL)
+            cur.execute(MIGRATIONS)
 
 
 def save_session(
@@ -339,6 +347,77 @@ def delete_session(session_id: str) -> bool:
     except Exception as e:
         logger.warning(f'[DB] delete_session failed for {session_id}: {e}')
         return False
+
+
+def update_session_metadata(
+    session_id: str,
+    target_role: Optional[str] = None,
+    interview_requirements: Optional[str] = None,
+    resume_filename: Optional[str] = None,
+) -> bool:
+    """Update optional session context fields."""
+    try:
+        with _get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    UPDATE sessions
+                       SET target_role = COALESCE(%s, target_role),
+                           interview_requirements = COALESCE(%s, interview_requirements),
+                           resume_filename = COALESCE(%s, resume_filename)
+                     WHERE session_id = %s
+                    """,
+                    (target_role, interview_requirements, resume_filename, session_id),
+                )
+        return True
+    except Exception as e:
+        logger.warning(f'[DB] update_session_metadata failed for {session_id}: {e}')
+        return False
+
+
+def save_session_conclusion(session_id: str, conclusion: Dict) -> bool:
+    """Persist generated session conclusion JSON."""
+    try:
+        with _get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    UPDATE sessions
+                       SET conclusion = %s::jsonb
+                     WHERE session_id = %s
+                    """,
+                    (json.dumps(conclusion), session_id),
+                )
+        return True
+    except Exception as e:
+        logger.warning(f'[DB] save_session_conclusion failed for {session_id}: {e}')
+        return False
+
+
+def get_session_conclusion(session_id: str) -> Optional[Dict]:
+    """Return stored session conclusion if available."""
+    try:
+        with _get_connection() as conn:
+            with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+                cur.execute(
+                    """
+                    SELECT session_id, candidate_name, target_role, interview_requirements,
+                           resume_filename, started_at, ended_at, status, conclusion
+                      FROM sessions
+                     WHERE session_id = %s
+                    """,
+                    (session_id,),
+                )
+                row = cur.fetchone()
+                if not row:
+                    return None
+                data = dict(row)
+                if data.get('conclusion') and isinstance(data['conclusion'], str):
+                    data['conclusion'] = json.loads(data['conclusion'])
+                return data
+    except Exception as e:
+        logger.warning(f'[DB] get_session_conclusion failed for {session_id}: {e}')
+        return None
 
 
 def rename_session(session_id: str, candidate_name: str) -> bool:

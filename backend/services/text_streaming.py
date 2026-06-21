@@ -59,6 +59,18 @@ def stream_text(
         # put() is safe from any OS thread; the greenthread worker emits it.
         _emit_queue.put(payload)
 
+        if metadata and session_id:
+            try:
+                from services.session_conclusion import record_streamed_question
+                record_streamed_question(
+                    session_id=session_id,
+                    source=metadata.get('source', ''),
+                    chunk=metadata.get('chunk'),
+                    text=text,
+                )
+            except Exception:
+                pass
+
         logger.debug(
             f'[TextStream] Queued text ({len(text)} chars) '
             f'session={session_id}, metadata={metadata}'

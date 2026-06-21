@@ -9,7 +9,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Figtree:wght@400;500;600&family=Syne:wght@700;800&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="css/style.css?v=11">
+    <link rel="stylesheet" href="css/style.css?v=12">
 </head>
 <body>
     <div class="app-shell">
@@ -161,7 +161,28 @@
         </main>
     </div>
 
+    <div id="conclusion-modal" class="conclusion-modal hidden" aria-hidden="true">
+        <div class="conclusion-backdrop" id="conclusion-backdrop"></div>
+        <div class="conclusion-dialog" role="dialog" aria-modal="true" aria-labelledby="conclusion-title">
+            <header class="conclusion-header">
+                <div>
+                    <p class="conclusion-kicker">Session Complete</p>
+                    <h2 id="conclusion-title">Interview Conclusion</h2>
+                </div>
+                <button id="conclusion-close-btn" class="conclusion-close-btn" type="button" aria-label="Close">&times;</button>
+            </header>
+            <div id="conclusion-body" class="conclusion-body">
+                <div class="conclusion-loading">Generating session conclusion...</div>
+            </div>
+            <footer class="conclusion-footer">
+                <a id="conclusion-history-link" href="/history" class="btn btn-secondary">View History</a>
+                <button id="conclusion-dismiss-btn" class="btn btn-primary" type="button">Close</button>
+            </footer>
+        </div>
+    </div>
+
     <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
-    <script src="js/app.js?v=9"></script>
+    <script src="js/conclusion-ui.js?v=1"></script>
+    <script src="js/app.js?v=11"></script>
 </body>
 </html>

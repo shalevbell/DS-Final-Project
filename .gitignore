@@ -70,6 +70,7 @@ backend/vocal_tone_model/*.zip
 # Data directories
 data/raw/
 data/processed/
+backend/data/resumes/
 
 # Logs
 *.log

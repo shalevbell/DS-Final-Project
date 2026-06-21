@@ -5,11 +5,19 @@ Registers HTTP endpoints for health checks and frontend serving.
 """
 
 import logging
-from flask import Flask, jsonify, request, send_from_directory
+from flask import Flask, jsonify, request, send_from_directory, send_file
 from chunk_processor import ChunkProcessor
 from services.connection_manager import check_postgres_health, check_redis_health
 from services.model_loader import get_preload_status
-from services.db_service import list_sessions, get_session_with_chunks, get_chunk_detail, delete_session, rename_session
+from services.db_service import (
+    list_sessions,
+    get_session_with_chunks,
+    get_chunk_detail,
+    delete_session,
+    rename_session,
+    get_session_conclusion,
+)
+from services.resume_storage import resolve_resume_for_session
 from run_models import list_savee_dataset_files
 
 logger = logging.getLogger(__name__)
@@ -185,7 +193,51 @@ def register_http_routes(app: Flask, chunk_processor: ChunkProcessor, frontend_d
             complete_session(session_id)
         except Exception as e:
             logger.warning(f'complete_session endpoint failed for {session_id}: {e}')
+
+        try:
+            from app import socketio
+            from services.session_conclusion import generate_and_emit_conclusion
+            import eventlet
+            eventlet.spawn_n(generate_and_emit_conclusion, session_id, socketio)
+        except Exception as e:
+            logger.warning(f'Conclusion generation via complete endpoint failed for {session_id}: {e}')
+
         return '', 204
+
+    @app.route('/api/sessions/<session_id>/conclusion', methods=['GET'])
+    def session_conclusion_endpoint(session_id):
+        """Return the generated session conclusion, or build it for completed sessions."""
+        data = get_session_conclusion(session_id)
+        if not data:
+            return jsonify({'error': 'Session not found'}), 404
+
+        conclusion = data.get('conclusion')
+        if not conclusion and data.get('status') == 'completed':
+            try:
+                from services.session_conclusion import build_session_conclusion, save_session_conclusion
+                conclusion = build_session_conclusion(session_id)
+                if conclusion:
+                    save_session_conclusion(session_id, conclusion)
+            except Exception as e:
+                logger.warning(f'On-demand conclusion build failed for {session_id}: {e}')
+
+        if not conclusion:
+            return jsonify({'status': 'pending', 'session_id': session_id}), 202
+        return jsonify({'session_id': session_id, 'conclusion': conclusion}), 200
+
+    @app.route('/api/sessions/<session_id>/resume', methods=['GET'])
+    def session_resume_download(session_id):
+        """Download the resume PDF uploaded at the start of the session."""
+        data = get_session_conclusion(session_id)
+        if not data or not data.get('resume_filename'):
+            return jsonify({'error': 'Resume not found for this session'}), 404
+
+        resolved = resolve_resume_for_session(session_id, data['resume_filename'])
+        if not resolved:
+            return jsonify({'error': 'Resume file missing on server'}), 404
+
+        path, download_name = resolved
+        return send_file(path, mimetype='application/pdf', as_attachment=True, download_name=download_name)
 
     @app.route('/history')
     def history_page():

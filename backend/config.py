@@ -105,3 +105,6 @@ class Config:
     OLLAMA_TIMEOUT = int(os.getenv("OLLAMA_TIMEOUT", "60"))
     # Lightweight model for resume-based warmup questions (qwen2.5:0.5b is ~352MB)
     OLLAMA_RESUME_MODEL_NAME = os.getenv("OLLAMA_RESUME_MODEL_NAME", "qwen2.5:0.5b")
+
+    # Persisted resume uploads per interview session
+    RESUME_STORAGE_DIR = os.getenv("RESUME_STORAGE_DIR", "/app/data/resumes")

@@ -13,6 +13,13 @@ class HistoryApp {
         this.chunksContainer = document.getElementById('chunks-container');
         this.btnCloseDetail = document.getElementById('btn-close-detail');
         this.btnRenameDetail = document.getElementById('btn-rename-detail');
+        this.btnViewConclusionDetail = document.getElementById('btn-view-conclusion-detail');
+        this.conclusionModal = document.getElementById('conclusion-modal');
+        this.conclusionBody = document.getElementById('conclusion-body');
+        this.conclusionTitle = document.getElementById('conclusion-title');
+        this.conclusionCloseBtn = document.getElementById('conclusion-close-btn');
+        this.conclusionDismissBtn = document.getElementById('conclusion-dismiss-btn');
+        this.conclusionBackdrop = document.getElementById('conclusion-backdrop');
 
         this.limit = 20;
         this.offset = 0;
@@ -47,6 +54,20 @@ class HistoryApp {
             this.currentDetailSessionId = null;
         });
         this.btnRenameDetail.addEventListener('click', () => this._startDetailRename());
+        this.btnViewConclusionDetail.addEventListener('click', () => {
+            if (this.currentDetailSessionId) {
+                this.openConclusion(this.currentDetailSessionId, this.currentDetailCandidateName);
+            }
+        });
+        if (this.conclusionCloseBtn) {
+            this.conclusionCloseBtn.addEventListener('click', () => this.hideConclusionModal());
+        }
+        if (this.conclusionDismissBtn) {
+            this.conclusionDismissBtn.addEventListener('click', () => this.hideConclusionModal());
+        }
+        if (this.conclusionBackdrop) {
+            this.conclusionBackdrop.addEventListener('click', () => this.hideConclusionModal());
+        }
     }
 
     _search() {
@@ -106,7 +127,8 @@ class HistoryApp {
                 <td>${statusBadge}</td>
                 <td>
                     <div class="actions-cell">
-                        <button class="btn btn-secondary btn-view" style="font-size:12px;padding:4px 10px;" type="button">View</button>
+                        <button class="btn btn-conclusion btn-view-conclusion" type="button">View Conclusion</button>
+                        <button class="btn btn-secondary btn-view" style="font-size:12px;padding:4px 10px;" type="button">View Chunks</button>
                         <button class="btn btn-secondary btn-rename" style="font-size:12px;padding:4px 10px;" type="button">Rename</button>
                         <button class="btn btn-danger btn-delete" style="font-size:12px;padding:4px 10px;" type="button">Delete</button>
                     </div>
@@ -116,6 +138,10 @@ class HistoryApp {
             tr.querySelector('.btn-view').addEventListener('click', () => {
                 this._selectRow(tr);
                 this.loadSessionDetail(session.session_id, session.candidate_name, session.started_at);
+            });
+            tr.querySelector('.btn-view-conclusion').addEventListener('click', () => {
+                this._selectRow(tr);
+                this.openConclusion(session.session_id, session.candidate_name);
             });
             tr.querySelector('.btn-rename').addEventListener('click', () => {
                 this._startInlineRename(tr, session);
@@ -457,6 +483,49 @@ class HistoryApp {
             .replace(/</g, '&lt;')
             .replace(/>/g, '&gt;')
             .replace(/"/g, '&quot;');
+    }
+
+    showConclusionLoading(candidateName) {
+        if (!this.conclusionModal || !this.conclusionBody) return;
+        this.conclusionModal.classList.remove('hidden');
+        this.conclusionModal.setAttribute('aria-hidden', 'false');
+        if (this.conclusionTitle) {
+            this.conclusionTitle.textContent = candidateName
+                ? `Interview Conclusion — ${candidateName}`
+                : 'Interview Conclusion';
+        }
+        this.conclusionBody.innerHTML = '<div class="conclusion-loading">Preparing session conclusion...</div>';
+    }
+
+    hideConclusionModal() {
+        if (!this.conclusionModal) return;
+        this.conclusionModal.classList.add('hidden');
+        this.conclusionModal.setAttribute('aria-hidden', 'true');
+    }
+
+    async openConclusion(sessionId, candidateName) {
+        this.showConclusionLoading(candidateName);
+
+        try {
+            const resp = await fetch(`${this.apiBase}/api/sessions/${encodeURIComponent(sessionId)}/conclusion`);
+            if (resp.status === 202) {
+                this.conclusionBody.innerHTML = '<div class="conclusion-loading">Conclusion is still being generated. Please try again in a moment.</div>';
+                return;
+            }
+            if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+            const data = await resp.json();
+            this.renderConclusion(data.conclusion);
+        } catch (err) {
+            this.conclusionBody.innerHTML = `<div class="conclusion-loading">Could not load conclusion: ${this._esc(err.message)}</div>`;
+        }
+    }
+
+    renderConclusion(conclusion) {
+        if (!this.conclusionBody || !conclusion || typeof ConclusionUI === 'undefined') return;
+        ConclusionUI.setTitle(this.conclusionTitle, conclusion);
+        this.conclusionBody.innerHTML = ConclusionUI.render(conclusion);
+        this.conclusionModal.classList.remove('hidden');
+        this.conclusionModal.setAttribute('aria-hidden', 'false');
     }
 }
 

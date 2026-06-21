@@ -140,6 +140,15 @@ class VideoApp {
         this.resumeFilename = document.getElementById('resume-filename');
         this.resumeRemoveBtn = document.getElementById('resume-remove-btn');
 
+        // Session conclusion modal
+        this.conclusionModal = document.getElementById('conclusion-modal');
+        this.conclusionBody = document.getElementById('conclusion-body');
+        this.conclusionCloseBtn = document.getElementById('conclusion-close-btn');
+        this.conclusionDismissBtn = document.getElementById('conclusion-dismiss-btn');
+        this.conclusionBackdrop = document.getElementById('conclusion-backdrop');
+        this.pendingConclusionSessionId = null;
+        this.conclusionPollTimer = null;
+
         // Disable camera button until models are ready
         this.toggleButton.disabled = true;
         this.toggleButton.textContent = 'Loading Models...';
@@ -228,6 +237,9 @@ class VideoApp {
         this.socket.on('text_stream', (data) => {
             this.handleTextStream(data);
         });
+        this.socket.on('session_conclusion', (data) => {
+            this.handleSessionConclusion(data);
+        });
     }
 
     sendWebSocketMessage(event, data = {}) {
@@ -275,6 +287,16 @@ class VideoApp {
                 if (counter) counter.classList.toggle('at-limit', len >= 100);
             };
             this.interviewRequirementsInput.addEventListener('input', updateCounter);
+        }
+
+        if (this.conclusionCloseBtn) {
+            this.conclusionCloseBtn.addEventListener('click', () => this.hideConclusionModal());
+        }
+        if (this.conclusionDismissBtn) {
+            this.conclusionDismissBtn.addEventListener('click', () => this.hideConclusionModal());
+        }
+        if (this.conclusionBackdrop) {
+            this.conclusionBackdrop.addEventListener('click', () => this.hideConclusionModal());
         }
     }
 
@@ -369,9 +391,14 @@ class VideoApp {
             if (this.interviewRequirementsInput) this.interviewRequirementsInput.disabled = true;
 
             let resumeData = null;
+            let resumeFilename = null;
             try {
                 const raw = localStorage.getItem('helperviewer_resume');
-                if (raw) resumeData = JSON.parse(raw).data || null;
+                if (raw) {
+                    const parsed = JSON.parse(raw);
+                    resumeData = parsed.data || null;
+                    resumeFilename = parsed.name || 'resume.pdf';
+                }
             } catch { /* localStorage unavailable or malformed */ }
 
             this.sendWebSocketMessage('stream_ready', {
@@ -382,7 +409,8 @@ class VideoApp {
                 status: 'active',
                 video: tracks.some(t => t.kind === 'video'),
                 audio: tracks.some(t => t.kind === 'audio'),
-                resumeData: resumeData
+                resumeData: resumeData,
+                resumeFilename: resumeFilename
             });
 
             console.log('Camera started:', this.sessionId);
@@ -507,8 +535,12 @@ class VideoApp {
         }
 
         // Notify backend the session has ended before clearing sessionId
-        if (this.sessionId) {
-            this.sendWebSocketMessage('stream_ended', { sessionId: this.sessionId });
+        const endedSessionId = this.sessionId;
+        if (endedSessionId) {
+            this.sendWebSocketMessage('stream_ended', { sessionId: endedSessionId });
+            this.pendingConclusionSessionId = endedSessionId;
+            this.showConclusionLoading();
+            this.pollForConclusion(endedSessionId);
         }
 
         this.resetSession();
@@ -1047,6 +1079,88 @@ class VideoApp {
         this.resumeChip.style.display = 'none';
         this.resumeUploadBtn.style.display = '';
         this.resumeFilename.textContent = '';
+    }
+
+    showConclusionLoading() {
+        if (!this.conclusionModal || !this.conclusionBody) return;
+        this.conclusionModal.classList.remove('hidden');
+        this.conclusionModal.setAttribute('aria-hidden', 'false');
+        this.conclusionBody.innerHTML = '<div class="conclusion-loading">Generating session conclusion...</div>';
+    }
+
+    hideConclusionModal() {
+        if (!this.conclusionModal) return;
+        this.conclusionModal.classList.add('hidden');
+        this.conclusionModal.setAttribute('aria-hidden', 'true');
+        this.pendingConclusionSessionId = null;
+        if (this.conclusionPollTimer) {
+            clearTimeout(this.conclusionPollTimer);
+            this.conclusionPollTimer = null;
+        }
+    }
+
+    handleSessionConclusion(data) {
+        const { sessionId, conclusion } = data || {};
+        if (!conclusion) return;
+        if (this.pendingConclusionSessionId && sessionId !== this.pendingConclusionSessionId) return;
+        this.renderConclusion(conclusion);
+    }
+
+    async pollForConclusion(sessionId, attempt = 0) {
+        const maxAttempts = 20;
+        if (!this.pendingConclusionSessionId || this.pendingConclusionSessionId !== sessionId) return;
+
+        try {
+            const { protocol, hostname, port } = window.location;
+            const origin = port ? `${protocol}//${hostname}:${port}` : `${protocol}//${hostname}`;
+            const response = await fetch(`${origin}/api/sessions/${encodeURIComponent(sessionId)}/conclusion`);
+
+            if (response.status === 200) {
+                const data = await response.json();
+                if (data.conclusion) {
+                    this.renderConclusion(data.conclusion);
+                    return;
+                }
+            }
+        } catch (error) {
+            console.warn('[Conclusion] Poll failed:', error);
+        }
+
+        if (attempt < maxAttempts) {
+            this.conclusionPollTimer = setTimeout(
+                () => this.pollForConclusion(sessionId, attempt + 1),
+                3000
+            );
+        } else if (this.conclusionBody) {
+            this.conclusionBody.innerHTML = '<div class="conclusion-loading">Conclusion is still processing. You can reopen it later from History.</div>';
+        }
+    }
+
+    renderConclusion(conclusion) {
+        if (!this.conclusionBody || !conclusion) return;
+
+        if (this.conclusionPollTimer) {
+            clearTimeout(this.conclusionPollTimer);
+            this.conclusionPollTimer = null;
+        }
+
+        this.conclusionModal.classList.remove('hidden');
+        this.conclusionModal.setAttribute('aria-hidden', 'false');
+
+        if (typeof ConclusionUI !== 'undefined') {
+            ConclusionUI.setTitle(document.getElementById('conclusion-title'), conclusion);
+            this.conclusionBody.innerHTML = ConclusionUI.render(conclusion);
+            return;
+        }
+
+        this.conclusionBody.innerHTML = '<div class="conclusion-loading">Conclusion renderer unavailable.</div>';
+    }
+
+    _escapeHtml(value) {
+        if (typeof ConclusionUI !== 'undefined') {
+            return ConclusionUI.escapeHtml(value);
+        }
+        return String(value ?? '');
     }
 
 }
