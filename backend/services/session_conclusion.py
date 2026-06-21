@@ -324,7 +324,7 @@ def generate_and_emit_conclusion(session_id: str, socketio) -> None:
             queue_socket_emit('session_conclusion', {
                 'sessionId': session_id,
                 'conclusion': existing['conclusion'],
-            }, broadcast=True)
+            })
             return
 
         eventlet.sleep(_CONCLUSION_WAIT_SECONDS)
@@ -348,7 +348,7 @@ def generate_and_emit_conclusion(session_id: str, socketio) -> None:
         queue_socket_emit('session_conclusion', {
             'sessionId': session_id,
             'conclusion': conclusion,
-        }, broadcast=True)
+        })
         logger.info(f'[Conclusion] Generated and emitted for session {session_id}')
 
     except Exception as e:

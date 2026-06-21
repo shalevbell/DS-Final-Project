@@ -5,8 +5,10 @@ Provides FIFO ordering, duplicate detection, and backpressure management.
 """
 
 import logging
-import queue
-import threading
+import eventlet.patcher as _ep
+
+_orig_queue = _ep.original('queue')
+_orig_threading = _ep.original('threading')
 from typing import Optional, Tuple, Set
 
 logger = logging.getLogger(__name__)
@@ -30,7 +32,7 @@ class ProcessingQueue:
         Args:
             maxsize: Maximum queue size before blocking (default: 100)
         """
-        self.queue = queue.Queue(maxsize=maxsize)
+        self.queue = _orig_queue.Queue(maxsize=maxsize)
         self.maxsize = maxsize
 
         # Track chunks currently being processed
@@ -40,7 +42,7 @@ class ProcessingQueue:
         self.pending: Set[str] = set()
 
         # Lock for thread-safe set operations
-        self.lock = threading.Lock()
+        self.lock = _orig_threading.Lock()
 
         logger.info(f'ProcessingQueue initialized with maxsize={maxsize}')
 
@@ -87,7 +89,7 @@ class ProcessingQueue:
                 self.pending.add(chunk_key)
                 logger.debug(f'Added chunk {chunk_key} to queue (size: {queue_size + 1})')
                 return True
-            except queue.Full:
+            except _orig_queue.Full:
                 logger.error(
                     f'Queue full, could not add chunk {chunk_key} within {timeout}s timeout'
                 )
@@ -115,7 +117,7 @@ class ProcessingQueue:
             logger.debug(f'Retrieved chunk {chunk_key} from queue')
             return session_id, chunk_index
 
-        except queue.Empty:
+        except _orig_queue.Empty:
             return None
 
     def mark_complete(self, session_id: str, chunk_index: int):
@@ -160,7 +162,7 @@ class ProcessingQueue:
             while not self.queue.empty():
                 try:
                     self.queue.get_nowait()
-                except queue.Empty:
+                except _orig_queue.Empty:
                     break
 
             self.pending.clear()

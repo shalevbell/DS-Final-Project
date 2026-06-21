@@ -7,14 +7,11 @@ Manages background processing of video/audio chunks using parallel analysis.
 import logging
 import json
 import time
-import threading
 from typing import Optional, Dict, Set
 from datetime import datetime
 from collections import defaultdict
 
 import redis
-import eventlet
-import eventlet.tpool
 import eventlet.patcher as _ep
 
 _orig_threading = _ep.original('threading')
@@ -75,8 +72,8 @@ class ChunkProcessor:
         # Initialize processing queue
         self.queue = ProcessingQueue(maxsize=queue_size)
 
-        # Shutdown event
-        self.shutdown_event = threading.Event()
+        # Shutdown event and locks use unpatched threading (accessed from OS worker threads)
+        self.shutdown_event = _orig_threading.Event()
 
         # Metrics
         self.metrics = {
@@ -85,12 +82,12 @@ class ChunkProcessor:
             'chunks_failed': 0,
             'processing_times': []
         }
-        self.metrics_lock = threading.Lock()
+        self.metrics_lock = _orig_threading.Lock()
 
         # Per-session ordering: only process chunk N+1 after chunk N is done
         self._session_next_chunk: Dict[str, int] = {}   # session_id -> next chunk index to process (1-based)
         self._session_pending: Dict[str, Set[int]] = defaultdict(set)  # session_id -> chunk indices waiting
-        self._order_lock = threading.Lock()
+        self._order_lock = _orig_threading.Lock()
 
         logger.info(
             f'ChunkProcessor initialized: workers={max_workers}, '
@@ -125,11 +122,10 @@ class ChunkProcessor:
         # Connect to Redis
         self._connect_redis()
 
-        # Start PUBSUB listener in eventlet greenthread
-        eventlet.spawn(self._pubsub_listener)
-
-        # Start queue processor in eventlet greenthread
-        eventlet.spawn(self._queue_processor)
+        # Start PUBSUB listener and queue processor on real OS threads so long-running
+        # chunk analysis never blocks or corrupts the eventlet WebSocket hub.
+        _orig_threading.Thread(target=self._pubsub_listener, daemon=True).start()
+        _orig_threading.Thread(target=self._queue_processor, daemon=True).start()
 
         logger.info('ChunkProcessor started (PUBSUB listener + queue processor)')
 
@@ -162,7 +158,7 @@ class ChunkProcessor:
 
                 if not self.shutdown_event.is_set():
                     logger.info(f'Reconnecting in {self.reconnect_delay}s...')
-                    eventlet.sleep(self.reconnect_delay)
+                    time.sleep(self.reconnect_delay)
 
                     # Recreate connection
                     try:
@@ -233,13 +229,16 @@ class ChunkProcessor:
 
                 session_id, chunk_index = result
 
-                # Spawn as greenthread; heavy CPU work inside escapes to real
-                # OS threads via eventlet.tpool.execute() in _process_chunk
-                eventlet.spawn(self._process_chunk_with_retry, session_id, chunk_index)
+                # Each chunk runs on its own OS thread — keeps eventlet hub free for WebSockets.
+                _orig_threading.Thread(
+                    target=self._process_chunk_with_retry,
+                    args=(session_id, chunk_index),
+                    daemon=True,
+                ).start()
 
             except Exception as e:
                 logger.error(f'Queue processor error: {e}')
-                eventlet.sleep(1.0)
+                time.sleep(1.0)
 
         logger.info('Queue processor stopped')
 
@@ -270,7 +269,7 @@ class ChunkProcessor:
                     f'Retrying chunk {session_id}:{chunk_index} after {delay}s '
                     f'(attempt {attempt}/{max_attempts}): {e}'
                 )
-                eventlet.sleep(delay)
+                time.sleep(delay)
                 self._process_chunk_with_retry(session_id, chunk_index, attempt + 1, max_attempts)
             else:
                 logger.error(f'Max retries exceeded for chunk {session_id}:{chunk_index}')
@@ -291,7 +290,7 @@ class ChunkProcessor:
                 if next_c in self._session_pending.get(session_id, set()):
                     self._session_pending[session_id].discard(next_c)
                     self.queue.add(session_id, next_c)
-                    logger.debug(f'Released chunk {session_id}:{next_c} for processing (order)')
+                    logger.info(f'Released chunk {session_id}:{next_c} for processing (order)')
 
     def _process_chunk(self, session_id: str, chunk_index: int):
         """
@@ -326,7 +325,6 @@ class ChunkProcessor:
                         queue_socket_emit(
                             'processing_heartbeat',
                             {'session_id': session_id, 'chunk_index': chunk_index},
-                            broadcast=True,
                         )
                 except Exception:
                     pass
@@ -336,10 +334,8 @@ class ChunkProcessor:
         heartbeat_thread = _orig_threading.Thread(target=_heartbeat_loop, daemon=True)
         heartbeat_thread.start()
         try:
-            # 3. Run analysis in a real OS thread via tpool (frees the eventlet hub).
-            # Inside, models run on unpatched OS threads — no eventlet primitives.
-            results = eventlet.tpool.execute(
-                run_parallel_analysis,
+            # Run analysis directly on this OS worker thread (models use their own threads).
+            results = run_parallel_analysis(
                 video_bytes,
                 audio_bytes,
                 session_id,
@@ -352,7 +348,7 @@ class ChunkProcessor:
                 dep: results.get(dep, {})
                 for dep in ("whisper", "mediapipe", "vocaltone", "clifton_fusion")
             }
-            ollama_thread = threading.Thread(
+            ollama_thread = _orig_threading.Thread(
                 target=self._run_ollama_background,
                 args=(audio_bytes, session_id, chunk_index, ollama_deps),
                 daemon=True,
