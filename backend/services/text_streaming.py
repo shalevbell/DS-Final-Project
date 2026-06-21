@@ -27,8 +27,12 @@ def start_emit_worker(socketio):
     def _worker():
         while True:
             try:
-                payload = _emit_queue.get_nowait()
-                socketio.emit('text_stream', payload)
+                item = _emit_queue.get_nowait()
+                if isinstance(item, dict) and item.get('_event'):
+                    emit_kwargs = item.get('_kwargs') or {}
+                    socketio.emit(item['_event'], item.get('_payload', {}), **emit_kwargs)
+                else:
+                    socketio.emit('text_stream', item)
             except _real_queue.Empty:
                 eventlet.sleep(0.05)
             except Exception as e:
@@ -36,6 +40,14 @@ def start_emit_worker(socketio):
                 eventlet.sleep(0)
 
     eventlet.spawn(_worker)
+
+
+def queue_socket_emit(event_name: str, payload: dict, **emit_kwargs) -> None:
+    """
+    Queue a SocketIO emit from any OS thread or greenthread.
+    The emit worker on the main eventlet hub performs the actual emit.
+    """
+    _emit_queue.put({'_event': event_name, '_payload': payload, '_kwargs': emit_kwargs})
 
 
 def stream_text(

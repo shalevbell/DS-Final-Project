@@ -214,10 +214,11 @@ def register_http_routes(app: Flask, chunk_processor: ChunkProcessor, frontend_d
         conclusion = data.get('conclusion')
         if not conclusion and data.get('status') == 'completed':
             try:
+                import eventlet
                 from services.session_conclusion import build_session_conclusion, save_session_conclusion
-                conclusion = build_session_conclusion(session_id)
+                conclusion = eventlet.tpool.execute(build_session_conclusion, session_id)
                 if conclusion:
-                    save_session_conclusion(session_id, conclusion)
+                    eventlet.tpool.execute(save_session_conclusion, session_id, conclusion)
             except Exception as e:
                 logger.warning(f'On-demand conclusion build failed for {session_id}: {e}')
 

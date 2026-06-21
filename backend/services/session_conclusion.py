@@ -13,7 +13,8 @@ from typing import Any, Dict, List, Optional
 import eventlet
 
 from services.connection_manager import get_redis_client
-from services.db_service import get_session_with_chunks, save_session_conclusion, update_session_metadata, get_session_conclusion
+from services.db_service import get_session_with_chunks, save_session_conclusion, get_session_conclusion
+from services.text_streaming import queue_socket_emit
 
 logger = logging.getLogger(__name__)
 
@@ -312,21 +313,29 @@ def build_session_conclusion(session_id: str) -> Optional[Dict[str, Any]]:
 def generate_and_emit_conclusion(session_id: str, socketio) -> None:
     """
     Wait briefly for final chunk processing, build conclusion, persist, and emit.
-    Runs in an eventlet greenthread.
+    Runs in an eventlet greenthread. Blocking DB work uses tpool; emits use the
+    thread-safe queue so we never call socketio.emit from the wrong thread.
     """
+    del socketio  # emits go through queue_socket_emit on the main hub worker
+
     try:
-        existing = get_session_conclusion(session_id)
+        existing = eventlet.tpool.execute(get_session_conclusion, session_id)
         if existing and existing.get('conclusion'):
-            payload = {'sessionId': session_id, 'conclusion': existing['conclusion']}
-            eventlet.spawn(lambda: socketio.emit('session_conclusion', payload))
+            queue_socket_emit('session_conclusion', {
+                'sessionId': session_id,
+                'conclusion': existing['conclusion'],
+            }, broadcast=True)
             return
 
         eventlet.sleep(_CONCLUSION_WAIT_SECONDS)
 
         conclusion = None
-        for attempt in range(_CONCLUSION_MAX_POLLS):
-            conclusion = build_session_conclusion(session_id)
-            if conclusion and (conclusion.get('chunks_processed', 0) > 0 or conclusion['questions'].get('total_count', 0) > 0):
+        for _attempt in range(_CONCLUSION_MAX_POLLS):
+            conclusion = eventlet.tpool.execute(build_session_conclusion, session_id)
+            if conclusion and (
+                conclusion.get('chunks_processed', 0) > 0
+                or conclusion['questions'].get('total_count', 0) > 0
+            ):
                 break
             eventlet.sleep(_CONCLUSION_POLL_INTERVAL)
 
@@ -334,13 +343,12 @@ def generate_and_emit_conclusion(session_id: str, socketio) -> None:
             logger.warning(f'[Conclusion] Could not build conclusion for {session_id}')
             return
 
-        save_session_conclusion(session_id, conclusion)
+        eventlet.tpool.execute(save_session_conclusion, session_id, conclusion)
 
-        payload = {
+        queue_socket_emit('session_conclusion', {
             'sessionId': session_id,
             'conclusion': conclusion,
-        }
-        eventlet.spawn(lambda: socketio.emit('session_conclusion', payload))
+        }, broadcast=True)
         logger.info(f'[Conclusion] Generated and emitted for session {session_id}')
 
     except Exception as e:

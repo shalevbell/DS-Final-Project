@@ -15,6 +15,9 @@ from collections import defaultdict
 import redis
 import eventlet
 import eventlet.tpool
+import eventlet.patcher as _ep
+
+_orig_threading = _ep.original('threading')
 
 from processing_queue import ProcessingQueue
 from run_models import run_parallel_analysis, get_available_models, analyze_interviewer_questions_ollama
@@ -311,22 +314,27 @@ class ChunkProcessor:
         if video_bytes is None or audio_bytes is None:
             raise ValueError(f'Missing chunk data in Redis for {session_id}:{chunk_index}')
 
-        # 2b. Start heartbeat so the WebSocket doesn't time out during long processing
-        heartbeat_stop = eventlet.event.Event()
+        # 2b. Heartbeat on an unpatched OS thread (never eventlet.sleep here — that
+        # conflicts with tpool/MediaPipe threads and causes greenlet switch errors).
+        heartbeat_stop = _orig_threading.Event()
+
         def _heartbeat_loop():
-            while not heartbeat_stop.ready():
+            from services.text_streaming import queue_socket_emit
+            while not heartbeat_stop.is_set():
                 try:
                     if self.socketio:
-                        self.socketio.emit(
+                        queue_socket_emit(
                             'processing_heartbeat',
                             {'session_id': session_id, 'chunk_index': chunk_index},
-                            broadcast=True
+                            broadcast=True,
                         )
                 except Exception:
                     pass
-                eventlet.sleep(15)
+                if heartbeat_stop.wait(15):
+                    break
 
-        heartbeat_greenlet = eventlet.spawn(_heartbeat_loop)
+        heartbeat_thread = _orig_threading.Thread(target=_heartbeat_loop, daemon=True)
+        heartbeat_thread.start()
         try:
             # 3. Run analysis in a real OS thread via tpool (frees the eventlet hub).
             # Inside, models run on unpatched OS threads — no eventlet primitives.
@@ -380,8 +388,8 @@ class ChunkProcessor:
 
             logger.info(f'[Processing] Chunk {chunk_index} completed in {processing_time}ms')
         finally:
-            heartbeat_stop.send()
-            heartbeat_greenlet.kill()
+            heartbeat_stop.set()
+            heartbeat_thread.join(timeout=1)
 
     def _run_ollama_background(
         self,
