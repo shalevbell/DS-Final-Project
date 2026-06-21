@@ -9,7 +9,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Figtree:wght@400;500;600&family=Syne:wght@700;800&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="css/style.css?v=8">
+    <link rel="stylesheet" href="css/style.css?v=11">
 </head>
 <body>
     <div class="app-shell">
@@ -80,17 +80,6 @@
                     <div class="panel">
                         <div class="panel-title">Interview Insights Dashboard</div>
 
-                        <div class="metrics-grid">
-                            <div class="metric-card">
-                                <p class="metric-label">Engagement Score</p>
-                                <p id="engagement-score" class="metric-value">--%</p>
-                            </div>
-                            <div class="metric-card">
-                                <p class="metric-label">Posture Stability</p>
-                                <p id="posture-stability" class="metric-value">--%</p>
-                            </div>
-                        </div>
-
                         <div class="sub-panel">
                             <h3>Live Question Generation</h3>
                             <div class="output-content" id="output-content">
@@ -100,11 +89,70 @@
                             </div>
                         </div>
 
+                        <div class="insight-grid">
+                            <div class="insight-card">
+                                <p class="insight-label">Stress Level</p>
+                                <div class="stress-faces" id="stress-faces" aria-hidden="true">
+                                    <span class="stress-face" data-level="calm" title="Calm">😊</span>
+                                    <span class="stress-face" data-level="neutral" title="Neutral">😐</span>
+                                    <span class="stress-face" data-level="tense" title="Tense">😟</span>
+                                    <span class="stress-face" data-level="high" title="High stress">😰</span>
+                                </div>
+                                <div class="stress-meter">
+                                    <div class="stress-meter-track"></div>
+                                    <span id="stress-meter-pointer" class="stress-meter-pointer"></span>
+                                </div>
+                                <p id="stress-level-value" class="insight-value">--</p>
+                                <p id="stress-level-desc" class="insight-caption">Waiting for camera...</p>
+                            </div>
+                            <div class="insight-card">
+                                <p class="insight-label">Eye Contact</p>
+                                <div id="eye-contact-indicator" class="status-indicator unknown" aria-label="Eye contact status">-</div>
+                                <p id="eye-contact-label" class="insight-caption">Waiting for camera...</p>
+                            </div>
+                            <div class="insight-card">
+                                <p class="insight-label">Body Stability</p>
+                                <div id="body-stability-indicator" class="status-indicator unknown" aria-label="Body stability status">-</div>
+                                <p id="body-stability-label" class="insight-caption">Waiting for camera...</p>
+                            </div>
+                        </div>
+
                         <div class="sub-panel">
                             <h3>Voice Profile</h3>
-                            <div class="voice-metrics">
-                                <div><span>Pitch:</span> <strong id="voice-pitch">-</strong></div>
-                                <div><span>Tempo:</span> <strong id="voice-tempo">-</strong></div>
+                            <div class="voice-profile-grid">
+                                <div class="voice-profile-card">
+                                    <p class="voice-profile-label">Voice Strength (Loudness)</p>
+                                    <div id="voice-loudness-light" class="traffic-light" data-state="none" aria-hidden="true">
+                                        <span class="tl-light red"></span>
+                                        <span class="tl-light yellow"></span>
+                                        <span class="tl-light green"></span>
+                                        <span class="tl-pointer"></span>
+                                    </div>
+                                    <p id="voice-loudness-value" class="voice-profile-value">-</p>
+                                    <p class="voice-profile-caption">Voice volume is: <span id="voice-loudness-desc">-</span></p>
+                                </div>
+                                <div class="voice-profile-card">
+                                    <p class="voice-profile-label">Voice Continuity (Flow)</p>
+                                    <div id="voice-flow-light" class="traffic-light" data-state="none" aria-hidden="true">
+                                        <span class="tl-light red"></span>
+                                        <span class="tl-light yellow"></span>
+                                        <span class="tl-light green"></span>
+                                        <span class="tl-pointer"></span>
+                                    </div>
+                                    <p id="voice-flow-value" class="voice-profile-value">-</p>
+                                    <p class="voice-profile-caption">Speech flow is: <span id="voice-flow-desc">-</span></p>
+                                </div>
+                                <div class="voice-profile-card">
+                                    <p class="voice-profile-label">Voice Confidence (Assurance)</p>
+                                    <div id="voice-confidence-light" class="traffic-light" data-state="none" aria-hidden="true">
+                                        <span class="tl-light red"></span>
+                                        <span class="tl-light yellow"></span>
+                                        <span class="tl-light green"></span>
+                                        <span class="tl-pointer"></span>
+                                    </div>
+                                    <p id="voice-confidence-value" class="voice-profile-value">-</p>
+                                    <p class="voice-profile-caption">Speaker confidence is: <span id="voice-confidence-desc">-</span></p>
+                                </div>
                             </div>
                         </div>
                     </div>
@@ -114,6 +162,6 @@
     </div>
 
     <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
-    <script src="js/app.js?v=7"></script>
+    <script src="js/app.js?v=9"></script>
 </body>
 </html>
