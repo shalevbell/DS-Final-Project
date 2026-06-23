@@ -16,8 +16,10 @@ from config import Config
 from services.connection_manager import get_redis_client, initialize_chunk_processor, get_chunk_processor
 from services.video_processor import parse_chunk_data, convert_chunk_with_ffmpeg
 from services.chunk_storage import store_chunk_in_redis, notify_chunk_ready
-from services.db_service import save_session, complete_session
+from services.db_service import save_session, complete_session, update_session_metadata
 from services.resume_questions import stream_resume_questions, decode_resume_data_url
+from services.resume_storage import save_session_resume
+from services.session_conclusion import generate_and_emit_conclusion
 
 logger = logging.getLogger(__name__)
 
@@ -97,11 +99,24 @@ def register_socketio_handlers(socketio: SocketIO, config: Config):
                 except Exception as e:
                     logger.warning(f'DB save_session failed (non-critical): {e}')
 
+                try:
+                    update_session_metadata(
+                        session_id=session_id,
+                        target_role=target_role or None,
+                        interview_requirements=interview_requirements or None,
+                    )
+                except Exception as e:
+                    logger.warning(f'DB update_session_metadata failed (non-critical): {e}')
+
                 # Kick off resume warmup questions if a resume was uploaded
                 resume_data_url = data.get('resumeData')
+                resume_filename = (data.get('resumeFilename') or 'resume.pdf').strip()
                 if resume_data_url:
                     try:
                         pdf_bytes = decode_resume_data_url(resume_data_url)
+                        stored_name = save_session_resume(session_id, pdf_bytes, resume_filename)
+                        if stored_name:
+                            update_session_metadata(session_id=session_id, resume_filename=stored_name)
                         eventlet.spawn_n(stream_resume_questions, session_id, pdf_bytes, target_role, socketio)
                         logger.info(f'[ResumeQuestions] Warmup question generation started for session {session_id}')
                     except Exception as e:
@@ -222,5 +237,11 @@ def register_socketio_handlers(socketio: SocketIO, config: Config):
             complete_session(session_id)
         except Exception as e:
             logger.warning(f'DB complete_session failed (non-critical): {e}')
+
+        # Build and stream session conclusion after final processing settles
+        try:
+            eventlet.spawn_n(generate_and_emit_conclusion, session_id, socketio)
+        except Exception as e:
+            logger.warning(f'Conclusion generation failed to start for {session_id}: {e}')
 
     logger.info('SocketIO handlers registered')

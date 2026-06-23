@@ -110,7 +110,19 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 12px;
   margin-bottom: 14px;
+}
+
+.detail-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.btn-detail-action {
+  font-size: 12px;
+  padding: 4px 12px;
 }
 
 #btn-close-detail {
@@ -242,6 +254,31 @@
   gap: 6px;
   align-items: center;
   white-space: nowrap;
+  flex-wrap: wrap;
+}
+
+.btn-conclusion {
+  font-size: 12px;
+  font-weight: 600;
+  padding: 5px 12px;
+  border-radius: var(--r-pill);
+  border: 1px solid rgba(3, 105, 161, 0.22);
+  background: linear-gradient(180deg, #f0f9ff 0%, #e0f2fe 100%);
+  color: var(--accent-btn);
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s, box-shadow 0.15s, transform 0.15s;
+}
+
+.btn-conclusion:hover:not(:disabled) {
+  background: var(--accent-btn);
+  color: #fff;
+  box-shadow: 0 4px 12px rgba(3, 105, 161, 0.22);
+  transform: translateY(-1px);
+}
+
+.btn-conclusion:disabled {
+  opacity: 0.55;
+  cursor: wait;
 }
 
 /* ── Rename Input ──────────────────────────────────────────────────── */

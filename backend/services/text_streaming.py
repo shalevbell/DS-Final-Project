@@ -27,15 +27,26 @@ def start_emit_worker(socketio):
     def _worker():
         while True:
             try:
-                payload = _emit_queue.get_nowait()
-                socketio.emit('text_stream', payload)
+                item = _emit_queue.get_nowait()
+                if isinstance(item, dict) and item.get('_event'):
+                    socketio.emit(item['_event'], item.get('_payload', {}))
+                else:
+                    socketio.emit('text_stream', item)
             except _real_queue.Empty:
                 eventlet.sleep(0.05)
             except Exception as e:
                 logger.error(f'[TextStream] emit worker error: {e}')
-                eventlet.sleep(0)
+                eventlet.sleep(0.05)
 
     eventlet.spawn(_worker)
+
+
+def queue_socket_emit(event_name: str, payload: dict) -> None:
+    """
+    Queue a SocketIO emit from any OS thread or greenthread.
+    The emit worker on the main eventlet hub performs the actual emit.
+    """
+    _emit_queue.put({'_event': event_name, '_payload': payload})
 
 
 def stream_text(
@@ -58,6 +69,18 @@ def stream_text(
 
         # put() is safe from any OS thread; the greenthread worker emits it.
         _emit_queue.put(payload)
+
+        if metadata and session_id:
+            try:
+                from services.session_conclusion import record_streamed_question
+                record_streamed_question(
+                    session_id=session_id,
+                    source=metadata.get('source', ''),
+                    chunk=metadata.get('chunk'),
+                    text=text,
+                )
+            except Exception:
+                pass
 
         logger.debug(
             f'[TextStream] Queued text ({len(text)} chars) '
