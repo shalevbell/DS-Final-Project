@@ -13,6 +13,22 @@ class TextStreamer {
         this.queue = []; // Queue of items (text or elements) to display
         this.isStreaming = false;
         this.streamSpeed = 15; // ms per character
+
+        // Stick-to-bottom auto-scroll: follows newest content while the user is
+        // pinned to the bottom; releases the moment they scroll up so we don't
+        // yank them back during streaming. Re-engages once they return to the bottom.
+        this.stickToBottom = true;
+        this._bottomThresholdPx = 24;
+        this.container.addEventListener('scroll', () => {
+            const distanceFromBottom = this.container.scrollHeight - this.container.scrollTop - this.container.clientHeight;
+            this.stickToBottom = distanceFromBottom <= this._bottomThresholdPx;
+        }, { passive: true });
+    }
+
+    _scrollIfStuck() {
+        if (this.stickToBottom) {
+            this.container.scrollTop = this.container.scrollHeight;
+        }
     }
 
     /**
@@ -53,15 +69,18 @@ class TextStreamer {
         if (item.type === 'element') {
             // Add element immediately
             this.container.appendChild(item.element);
+            this._scrollIfStuck();
         } else if (item.type === 'text') {
             // Create container for this text segment
             const textElement = document.createElement('div');
             textElement.className = item.className;
             this.container.appendChild(textElement);
+            this._scrollIfStuck();
 
             // Stream letter by letter
             for (let i = 0; i < item.text.length; i++) {
                 textElement.textContent += item.text[i];
+                this._scrollIfStuck();
                 await this.sleep(this.streamSpeed);
             }
         }
@@ -116,6 +135,25 @@ class VideoApp {
         this.voiceConfidenceValue = document.getElementById('voice-confidence-value');
         this.voiceConfidenceDesc = document.getElementById('voice-confidence-desc');
         this.sentimentAlert = document.getElementById('sentiment-alert');
+
+        // Time-series history per emotion meter — { chunk, value } samples.
+        this.metricHistory = { stress: [], voiceLoudness: [], voiceFlow: [], voiceConfidence: [] };
+        this.metricChartConfig = {
+            stress:          { el: document.getElementById('chart-stress'),          min: 0, max: 100, unit: '%'   },
+            voiceLoudness:   { el: document.getElementById('chart-voice-loudness'),  min: 0, max: 100, unit: '%'   },
+            voiceFlow:       { el: document.getElementById('chart-voice-flow'),      min: 40, max: 200, unit: 'BPM' },
+            voiceConfidence: { el: document.getElementById('chart-voice-confidence'),min: 0, max: 100, unit: '%'   },
+        };
+        this.metricHistoryMax = 30;
+        this.lastChunk = 0;
+        Object.keys(this.metricHistory).forEach((name) => this.renderSparkline(name));
+        let resizeTimer = null;
+        window.addEventListener('resize', () => {
+            if (resizeTimer) clearTimeout(resizeTimer);
+            resizeTimer = setTimeout(() => {
+                Object.keys(this.metricHistory).forEach((n) => this.renderSparkline(n));
+            }, 120);
+        });
         this.localStream = null;
         this.mediaRecorder = null;
         this.socket = null;
@@ -219,7 +257,7 @@ class VideoApp {
                 console.log(
                     `[ChunkResults] Chunk ${chunkIndex} models: ${Object.keys(results).join(', ')}`
                 );
-                this.updateMetricsFromChunkResults(results);
+                this.updateMetricsFromChunkResults(results, chunkIndex);
             } else {
                 console.log('[ChunkResults] Received chunk results', data);
             }
@@ -592,13 +630,17 @@ class VideoApp {
 
     updateInsightWidgets(text, metadata) {
         const lowerText = (text || '').toLowerCase();
-        this.tryUpdateMetricsFromText(text);
+        this.tryUpdateMetricsFromText(text, metadata);
+
+        if (metadata && typeof metadata.chunk === 'number') {
+            this.lastChunk = metadata.chunk;
+        }
 
         if (metadata && metadata.source === 'mediapipe') {
-            this.updateMediapipeInsights(metadata);
+            this.updateMediapipeInsights(metadata, metadata);
         }
         if (metadata && metadata.source === 'vocaltone') {
-            this.updateVoiceProfileFromVocaltone(metadata);
+            this.updateVoiceProfileFromVocaltone(metadata, metadata);
         }
 
         if (this.sentimentAlert) {
@@ -616,14 +658,15 @@ class VideoApp {
         }
     }
 
-    updateMetricsFromChunkResults(results) {
+    updateMetricsFromChunkResults(results, chunkIndex) {
         if (!results || typeof results !== 'object') return;
 
         const mediapipe = results.mediapipe || {};
         const vocaltone = results.vocaltone || {};
+        const meta = (typeof chunkIndex === 'number') ? { chunk: chunkIndex } : null;
 
-        this.updateMediapipeInsights(mediapipe);
-        this.updateVoiceProfileFromVocaltone(vocaltone);
+        this.updateMediapipeInsights(mediapipe, meta);
+        this.updateVoiceProfileFromVocaltone(vocaltone, meta);
 
         const emotion = (mediapipe.dominant_emotion || vocaltone.emotion || '').toLowerCase();
         if (this.sentimentAlert && emotion) {
@@ -641,7 +684,7 @@ class VideoApp {
         }
     }
 
-    tryUpdateMetricsFromText(text) {
+    tryUpdateMetricsFromText(text, metadata) {
         if (!text || typeof text !== 'string') return;
 
         const stressMatch = text.match(/stress:\s*(\d+)%/i);
@@ -655,7 +698,7 @@ class VideoApp {
             if (stressMatch) mediapipeData.stress_level = Number(stressMatch[1]);
             if (eyeContactMatch) mediapipeData.eye_contact = eyeContactMatch[1].toLowerCase() === 'yes';
             if (bodyStableMatch) mediapipeData.body_stable = bodyStableMatch[1].toLowerCase() === 'yes';
-            this.updateMediapipeInsights(mediapipeData);
+            this.updateMediapipeInsights(mediapipeData, metadata);
         }
 
         if (pitchMatch || tempoMatch) {
@@ -663,15 +706,20 @@ class VideoApp {
             const vocaltoneData = {};
             if (tempoMatch) vocaltoneData.tempo_bpm = Number(tempoMatch[1]);
             if (confidenceMatch) vocaltoneData.confidence = Number(confidenceMatch[1]) / 100;
-            this.updateVoiceProfileFromVocaltone(vocaltoneData);
+            this.updateVoiceProfileFromVocaltone(vocaltoneData, metadata);
         }
     }
 
-    updateMediapipeInsights(data) {
+    updateMediapipeInsights(data, metadata) {
         if (!data || typeof data !== 'object') return;
+
+        const chunk = (metadata && typeof metadata.chunk === 'number')
+            ? metadata.chunk
+            : this.lastChunk;
 
         if (typeof data.stress_level === 'number') {
             const stress = Math.max(0, Math.min(100, Math.round(data.stress_level)));
+            this.recordMetric('stress', chunk, stress);
             let level = 'neutral';
             let desc = 'Neutral';
 
@@ -736,8 +784,12 @@ class VideoApp {
         }
     }
 
-    updateVoiceProfileFromVocaltone(data) {
+    updateVoiceProfileFromVocaltone(data, metadata) {
         if (!data || typeof data !== 'object') return;
+
+        const chunk = (metadata && typeof metadata.chunk === 'number')
+            ? metadata.chunk
+            : this.lastChunk;
 
         const energy = typeof data.energy_level === 'number' ? data.energy_level : null;
         const tempo = typeof data.tempo_bpm === 'number'
@@ -757,6 +809,7 @@ class VideoApp {
                 `${volumePct}%`,
                 desc
             );
+            this.recordMetric('voiceLoudness', chunk, volumePct);
         }
 
         if (tempo !== null && tempo > 0) {
@@ -771,6 +824,7 @@ class VideoApp {
                 `${roundedTempo} BPM`,
                 desc
             );
+            this.recordMetric('voiceFlow', chunk, roundedTempo);
         }
 
         if (confidence !== null && confidence > 0) {
@@ -785,7 +839,145 @@ class VideoApp {
                 `${confidencePct}%`,
                 desc
             );
+            this.recordMetric('voiceConfidence', chunk, confidencePct);
         }
+    }
+
+    recordMetric(name, chunk, value) {
+        const history = this.metricHistory[name];
+        if (!history) return;
+        const safeChunk = (typeof chunk === 'number' && chunk >= 0) ? chunk : (history.length ? history[history.length - 1].chunk + 1 : 0);
+        const last = history[history.length - 1];
+        if (last && last.chunk === safeChunk) {
+            last.value = value;
+        } else {
+            history.push({ chunk: safeChunk, value });
+            if (history.length > this.metricHistoryMax) {
+                history.shift();
+            }
+        }
+        this.renderSparkline(name);
+    }
+
+    renderSparkline(name) {
+        const cfg = this.metricChartConfig[name];
+        if (!cfg || !cfg.el) return;
+        const svg = cfg.el;
+        const SVG_NS = 'http://www.w3.org/2000/svg';
+        const width = svg.clientWidth || 240;
+        const height = svg.clientHeight || 64;
+        svg.setAttribute('viewBox', `0 0 ${width} ${height}`);
+        svg.setAttribute('preserveAspectRatio', 'none');
+        while (svg.firstChild) svg.removeChild(svg.firstChild);
+
+        const padLeft = 26;
+        const padRight = 6;
+        const padTop = 6;
+        const padBottom = 14;
+        const plotW = Math.max(10, width - padLeft - padRight);
+        const plotH = Math.max(10, height - padTop - padBottom);
+
+        const drawAxis = () => {
+            const xAxis = document.createElementNS(SVG_NS, 'line');
+            xAxis.setAttribute('class', 'axis-line');
+            xAxis.setAttribute('x1', padLeft);
+            xAxis.setAttribute('y1', padTop + plotH);
+            xAxis.setAttribute('x2', padLeft + plotW);
+            xAxis.setAttribute('y2', padTop + plotH);
+            svg.appendChild(xAxis);
+
+            const yAxis = document.createElementNS(SVG_NS, 'line');
+            yAxis.setAttribute('class', 'axis-line');
+            yAxis.setAttribute('x1', padLeft);
+            yAxis.setAttribute('y1', padTop);
+            yAxis.setAttribute('x2', padLeft);
+            yAxis.setAttribute('y2', padTop + plotH);
+            svg.appendChild(yAxis);
+
+            // y-axis labels: max, mid, min
+            const yLabels = [
+                { v: cfg.max, y: padTop + 2 },
+                { v: Math.round((cfg.max + cfg.min) / 2), y: padTop + plotH / 2 + 3 },
+                { v: cfg.min, y: padTop + plotH },
+            ];
+            yLabels.forEach((lbl) => {
+                const t = document.createElementNS(SVG_NS, 'text');
+                t.setAttribute('class', 'axis-label');
+                t.setAttribute('x', padLeft - 4);
+                t.setAttribute('y', lbl.y);
+                t.setAttribute('text-anchor', 'end');
+                t.textContent = `${lbl.v}`;
+                svg.appendChild(t);
+            });
+
+            // mid grid line
+            const grid = document.createElementNS(SVG_NS, 'line');
+            grid.setAttribute('class', 'grid-line');
+            grid.setAttribute('x1', padLeft);
+            grid.setAttribute('y1', padTop + plotH / 2);
+            grid.setAttribute('x2', padLeft + plotW);
+            grid.setAttribute('y2', padTop + plotH / 2);
+            svg.appendChild(grid);
+        };
+
+        drawAxis();
+
+        const history = this.metricHistory[name] || [];
+        if (history.length === 0) {
+            const t = document.createElementNS(SVG_NS, 'text');
+            t.setAttribute('class', 'empty-label');
+            t.setAttribute('x', padLeft + plotW / 2);
+            t.setAttribute('y', padTop + plotH / 2 + 3);
+            t.setAttribute('text-anchor', 'middle');
+            t.textContent = 'awaiting chunks';
+            svg.appendChild(t);
+            return;
+        }
+
+        const minChunk = history[0].chunk;
+        const maxChunk = history[history.length - 1].chunk;
+        const chunkSpan = Math.max(1, maxChunk - minChunk);
+        const valueSpan = Math.max(1, cfg.max - cfg.min);
+
+        const xFor = (chunk) => padLeft + ((chunk - minChunk) / chunkSpan) * plotW;
+        const yFor = (value) => {
+            const clamped = Math.max(cfg.min, Math.min(cfg.max, value));
+            return padTop + plotH - ((clamped - cfg.min) / valueSpan) * plotH;
+        };
+
+        if (history.length >= 2) {
+            const points = history.map((p) => `${xFor(p.chunk).toFixed(1)},${yFor(p.value).toFixed(1)}`).join(' ');
+            const line = document.createElementNS(SVG_NS, 'polyline');
+            line.setAttribute('class', 'data-line');
+            line.setAttribute('points', points);
+            svg.appendChild(line);
+        }
+
+        history.forEach((p) => {
+            const c = document.createElementNS(SVG_NS, 'circle');
+            c.setAttribute('class', 'data-point');
+            c.setAttribute('cx', xFor(p.chunk).toFixed(1));
+            c.setAttribute('cy', yFor(p.value).toFixed(1));
+            c.setAttribute('r', '2');
+            svg.appendChild(c);
+        });
+
+        // x-axis labels: first and last chunk index
+        const xLabels = (history.length === 1)
+            ? [{ chunk: history[0].chunk, anchor: 'middle', x: xFor(history[0].chunk) }]
+            : [
+                { chunk: minChunk, anchor: 'start',  x: padLeft },
+                { chunk: maxChunk, anchor: 'end',    x: padLeft + plotW },
+            ];
+        xLabels.forEach((lbl) => {
+            const t = document.createElementNS(SVG_NS, 'text');
+            t.setAttribute('class', 'axis-label');
+            t.setAttribute('x', lbl.x);
+            t.setAttribute('y', padTop + plotH + 11);
+            t.setAttribute('text-anchor', lbl.anchor);
+            t.textContent = `c${lbl.chunk}`;
+            svg.appendChild(t);
+        });
     }
 
     _setVoiceProfileCard(lightEl, valueEl, descEl, state, valueText, descText) {
@@ -818,6 +1010,13 @@ class VideoApp {
             this.sentimentAlert.className = 'alert-chip neutral';
             this.sentimentAlert.textContent = 'No sentiment alerts';
         }
+        if (this.metricHistory) {
+            Object.keys(this.metricHistory).forEach((name) => {
+                this.metricHistory[name] = [];
+                this.renderSparkline(name);
+            });
+        }
+        this.lastChunk = 0;
     }
 
     /**
