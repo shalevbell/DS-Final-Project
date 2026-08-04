@@ -178,14 +178,14 @@ class VideoApp {
         this.resumeFilename = document.getElementById('resume-filename');
         this.resumeRemoveBtn = document.getElementById('resume-remove-btn');
 
-        // Session conclusion modal
-        this.conclusionModal = document.getElementById('conclusion-modal');
-        this.conclusionBody = document.getElementById('conclusion-body');
-        this.conclusionCloseBtn = document.getElementById('conclusion-close-btn');
-        this.conclusionDismissBtn = document.getElementById('conclusion-dismiss-btn');
-        this.conclusionBackdrop = document.getElementById('conclusion-backdrop');
+        // Session conclusion toast
+        this.conclusionToast = document.getElementById('conclusion-toast');
+        this.conclusionToastTitle = document.getElementById('conclusion-toast-title');
+        this.conclusionToastMessage = document.getElementById('conclusion-toast-message');
+        this.conclusionToastClose = document.getElementById('conclusion-toast-close');
         this.pendingConclusionSessionId = null;
         this.conclusionPollTimer = null;
+        this.conclusionDownloaded = false;
 
         // Disable camera button until models are ready
         this.toggleButton.disabled = true;
@@ -327,14 +327,8 @@ class VideoApp {
             this.interviewRequirementsInput.addEventListener('input', updateCounter);
         }
 
-        if (this.conclusionCloseBtn) {
-            this.conclusionCloseBtn.addEventListener('click', () => this.hideConclusionModal());
-        }
-        if (this.conclusionDismissBtn) {
-            this.conclusionDismissBtn.addEventListener('click', () => this.hideConclusionModal());
-        }
-        if (this.conclusionBackdrop) {
-            this.conclusionBackdrop.addEventListener('click', () => this.hideConclusionModal());
+        if (this.conclusionToastClose) {
+            this.conclusionToastClose.addEventListener('click', () => this.hideConclusionToast());
         }
     }
 
@@ -577,7 +571,12 @@ class VideoApp {
         if (endedSessionId) {
             this.sendWebSocketMessage('stream_ended', { sessionId: endedSessionId });
             this.pendingConclusionSessionId = endedSessionId;
-            this.showConclusionLoading();
+            this.conclusionDownloaded = false;
+            this.showConclusionToast({
+                title: 'Session complete',
+                message: 'Preparing your interview conclusion...',
+                state: 'pending',
+            });
             this.pollForConclusion(endedSessionId);
         }
 
@@ -1280,34 +1279,31 @@ class VideoApp {
         this.resumeFilename.textContent = '';
     }
 
-    showConclusionLoading() {
-        if (!this.conclusionModal || !this.conclusionBody) return;
-        this.conclusionModal.classList.remove('hidden');
-        this.conclusionModal.setAttribute('aria-hidden', 'false');
-        this.conclusionBody.innerHTML = '<div class="conclusion-loading">Generating session conclusion...</div>';
+    showConclusionToast({ title, message, state }) {
+        if (!this.conclusionToast) return;
+        if (this.conclusionToastTitle && title) this.conclusionToastTitle.textContent = title;
+        if (this.conclusionToastMessage && message) this.conclusionToastMessage.textContent = message;
+        this.conclusionToast.classList.remove('hidden', 'is-ready', 'is-error');
+        if (state === 'ready') this.conclusionToast.classList.add('is-ready');
+        if (state === 'error') this.conclusionToast.classList.add('is-error');
     }
 
-    hideConclusionModal() {
-        if (!this.conclusionModal) return;
-        this.conclusionModal.classList.add('hidden');
-        this.conclusionModal.setAttribute('aria-hidden', 'true');
-        this.pendingConclusionSessionId = null;
-        if (this.conclusionPollTimer) {
-            clearTimeout(this.conclusionPollTimer);
-            this.conclusionPollTimer = null;
-        }
+    hideConclusionToast() {
+        if (!this.conclusionToast) return;
+        this.conclusionToast.classList.add('hidden');
     }
 
     handleSessionConclusion(data) {
         const { sessionId, conclusion } = data || {};
         if (!conclusion) return;
         if (this.pendingConclusionSessionId && sessionId !== this.pendingConclusionSessionId) return;
-        this.renderConclusion(conclusion);
+        this._downloadConclusionMarkdown(sessionId || this.pendingConclusionSessionId);
     }
 
     async pollForConclusion(sessionId, attempt = 0) {
         const maxAttempts = 20;
         if (!this.pendingConclusionSessionId || this.pendingConclusionSessionId !== sessionId) return;
+        if (this.conclusionDownloaded) return;
 
         try {
             const { protocol, hostname, port } = window.location;
@@ -1317,7 +1313,7 @@ class VideoApp {
             if (response.status === 200) {
                 const data = await response.json();
                 if (data.conclusion) {
-                    this.renderConclusion(data.conclusion);
+                    this._downloadConclusionMarkdown(sessionId);
                     return;
                 }
             }
@@ -1330,36 +1326,59 @@ class VideoApp {
                 () => this.pollForConclusion(sessionId, attempt + 1),
                 3000
             );
-        } else if (this.conclusionBody) {
-            this.conclusionBody.innerHTML = '<div class="conclusion-loading">Conclusion is still processing. You can reopen it later from History.</div>';
+        } else {
+            this.showConclusionToast({
+                title: 'Still processing',
+                message: 'Conclusion is not ready yet. You can download it later from History.',
+                state: 'error',
+            });
         }
     }
 
-    renderConclusion(conclusion) {
-        if (!this.conclusionBody || !conclusion) return;
-
+    async _downloadConclusionMarkdown(sessionId) {
+        if (!sessionId || this.conclusionDownloaded) return;
         if (this.conclusionPollTimer) {
             clearTimeout(this.conclusionPollTimer);
             this.conclusionPollTimer = null;
         }
+        this.conclusionDownloaded = true;
 
-        this.conclusionModal.classList.remove('hidden');
-        this.conclusionModal.setAttribute('aria-hidden', 'false');
+        const { protocol, hostname, port } = window.location;
+        const origin = port ? `${protocol}//${hostname}:${port}` : `${protocol}//${hostname}`;
+        const url = `${origin}/api/sessions/${encodeURIComponent(sessionId)}/conclusion.md`;
 
-        if (typeof ConclusionUI !== 'undefined') {
-            ConclusionUI.setTitle(document.getElementById('conclusion-title'), conclusion);
-            this.conclusionBody.innerHTML = ConclusionUI.render(conclusion);
-            return;
+        try {
+            const response = await fetch(url);
+            if (!response.ok) throw new Error(`HTTP ${response.status}`);
+
+            const blob = await response.blob();
+            const contentDisposition = response.headers.get('Content-Disposition') || '';
+            const match = /filename="?([^"]+)"?/i.exec(contentDisposition);
+            const filename = match ? match[1] : `interview-conclusion-${sessionId}.md`;
+
+            const objectUrl = URL.createObjectURL(blob);
+            const link = document.createElement('a');
+            link.href = objectUrl;
+            link.download = filename;
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            setTimeout(() => URL.revokeObjectURL(objectUrl), 2000);
+
+            this.showConclusionToast({
+                title: 'Conclusion downloaded',
+                message: `Saved ${filename} to your downloads.`,
+                state: 'ready',
+            });
+        } catch (error) {
+            console.warn('[Conclusion] Markdown download failed:', error);
+            this.conclusionDownloaded = false;
+            this.showConclusionToast({
+                title: 'Download failed',
+                message: 'Could not download the conclusion. Try again from History.',
+                state: 'error',
+            });
         }
-
-        this.conclusionBody.innerHTML = '<div class="conclusion-loading">Conclusion renderer unavailable.</div>';
-    }
-
-    _escapeHtml(value) {
-        if (typeof ConclusionUI !== 'undefined') {
-            return ConclusionUI.escapeHtml(value);
-        }
-        return String(value ?? '');
     }
 
 }

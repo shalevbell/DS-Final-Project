@@ -14,12 +14,11 @@ class HistoryApp {
         this.btnCloseDetail = document.getElementById('btn-close-detail');
         this.btnRenameDetail = document.getElementById('btn-rename-detail');
         this.btnViewConclusionDetail = document.getElementById('btn-view-conclusion-detail');
-        this.conclusionModal = document.getElementById('conclusion-modal');
-        this.conclusionBody = document.getElementById('conclusion-body');
-        this.conclusionTitle = document.getElementById('conclusion-title');
-        this.conclusionCloseBtn = document.getElementById('conclusion-close-btn');
-        this.conclusionDismissBtn = document.getElementById('conclusion-dismiss-btn');
-        this.conclusionBackdrop = document.getElementById('conclusion-backdrop');
+        this.conclusionToast = document.getElementById('conclusion-toast');
+        this.conclusionToastTitle = document.getElementById('conclusion-toast-title');
+        this.conclusionToastMessage = document.getElementById('conclusion-toast-message');
+        this.conclusionToastClose = document.getElementById('conclusion-toast-close');
+        this._toastHideTimer = null;
 
         this.limit = 20;
         this.offset = 0;
@@ -56,17 +55,11 @@ class HistoryApp {
         this.btnRenameDetail.addEventListener('click', () => this._startDetailRename());
         this.btnViewConclusionDetail.addEventListener('click', () => {
             if (this.currentDetailSessionId) {
-                this.openConclusion(this.currentDetailSessionId, this.currentDetailCandidateName);
+                this.downloadConclusion(this.currentDetailSessionId, this.currentDetailCandidateName);
             }
         });
-        if (this.conclusionCloseBtn) {
-            this.conclusionCloseBtn.addEventListener('click', () => this.hideConclusionModal());
-        }
-        if (this.conclusionDismissBtn) {
-            this.conclusionDismissBtn.addEventListener('click', () => this.hideConclusionModal());
-        }
-        if (this.conclusionBackdrop) {
-            this.conclusionBackdrop.addEventListener('click', () => this.hideConclusionModal());
+        if (this.conclusionToastClose) {
+            this.conclusionToastClose.addEventListener('click', () => this._hideToast());
         }
     }
 
@@ -127,7 +120,7 @@ class HistoryApp {
                 <td>${statusBadge}</td>
                 <td>
                     <div class="actions-cell">
-                        <button class="btn btn-conclusion btn-view-conclusion" type="button">View Conclusion</button>
+                        <button class="btn btn-conclusion btn-view-conclusion" type="button">Download Conclusion</button>
                         <button class="btn btn-secondary btn-view" style="font-size:12px;padding:4px 10px;" type="button">View Chunks</button>
                         <button class="btn btn-secondary btn-rename" style="font-size:12px;padding:4px 10px;" type="button">Rename</button>
                         <button class="btn btn-danger btn-delete" style="font-size:12px;padding:4px 10px;" type="button">Delete</button>
@@ -141,7 +134,7 @@ class HistoryApp {
             });
             tr.querySelector('.btn-view-conclusion').addEventListener('click', () => {
                 this._selectRow(tr);
-                this.openConclusion(session.session_id, session.candidate_name);
+                this.downloadConclusion(session.session_id, session.candidate_name);
             });
             tr.querySelector('.btn-rename').addEventListener('click', () => {
                 this._startInlineRename(tr, session);
@@ -485,47 +478,70 @@ class HistoryApp {
             .replace(/"/g, '&quot;');
     }
 
-    showConclusionLoading(candidateName) {
-        if (!this.conclusionModal || !this.conclusionBody) return;
-        this.conclusionModal.classList.remove('hidden');
-        this.conclusionModal.setAttribute('aria-hidden', 'false');
-        if (this.conclusionTitle) {
-            this.conclusionTitle.textContent = candidateName
-                ? `Interview Conclusion — ${candidateName}`
-                : 'Interview Conclusion';
+    _showToast({ title, message, state }) {
+        if (!this.conclusionToast) return;
+        if (this.conclusionToastTitle && title) this.conclusionToastTitle.textContent = title;
+        if (this.conclusionToastMessage && message) this.conclusionToastMessage.textContent = message;
+        this.conclusionToast.classList.remove('hidden', 'is-ready', 'is-error');
+        if (state === 'ready') this.conclusionToast.classList.add('is-ready');
+        if (state === 'error') this.conclusionToast.classList.add('is-error');
+
+        if (this._toastHideTimer) clearTimeout(this._toastHideTimer);
+        if (state === 'ready') {
+            this._toastHideTimer = setTimeout(() => this._hideToast(), 4500);
         }
-        this.conclusionBody.innerHTML = '<div class="conclusion-loading">Preparing session conclusion...</div>';
     }
 
-    hideConclusionModal() {
-        if (!this.conclusionModal) return;
-        this.conclusionModal.classList.add('hidden');
-        this.conclusionModal.setAttribute('aria-hidden', 'true');
+    _hideToast() {
+        if (!this.conclusionToast) return;
+        this.conclusionToast.classList.add('hidden');
     }
 
-    async openConclusion(sessionId, candidateName) {
-        this.showConclusionLoading(candidateName);
+    async downloadConclusion(sessionId, candidateName) {
+        this._showToast({
+            title: 'Preparing conclusion',
+            message: candidateName ? `Building ${candidateName}'s report...` : 'Building session report...',
+            state: 'pending',
+        });
 
         try {
-            const resp = await fetch(`${this.apiBase}/api/sessions/${encodeURIComponent(sessionId)}/conclusion`);
+            const resp = await fetch(`${this.apiBase}/api/sessions/${encodeURIComponent(sessionId)}/conclusion.md`);
             if (resp.status === 202) {
-                this.conclusionBody.innerHTML = '<div class="conclusion-loading">Conclusion is still being generated. Please try again in a moment.</div>';
+                this._showToast({
+                    title: 'Still processing',
+                    message: 'Conclusion is not ready yet. Please try again shortly.',
+                    state: 'error',
+                });
                 return;
             }
             if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-            const data = await resp.json();
-            this.renderConclusion(data.conclusion);
-        } catch (err) {
-            this.conclusionBody.innerHTML = `<div class="conclusion-loading">Could not load conclusion: ${this._esc(err.message)}</div>`;
-        }
-    }
 
-    renderConclusion(conclusion) {
-        if (!this.conclusionBody || !conclusion || typeof ConclusionUI === 'undefined') return;
-        ConclusionUI.setTitle(this.conclusionTitle, conclusion);
-        this.conclusionBody.innerHTML = ConclusionUI.render(conclusion);
-        this.conclusionModal.classList.remove('hidden');
-        this.conclusionModal.setAttribute('aria-hidden', 'false');
+            const blob = await resp.blob();
+            const contentDisposition = resp.headers.get('Content-Disposition') || '';
+            const match = /filename="?([^"]+)"?/i.exec(contentDisposition);
+            const filename = match ? match[1] : `interview-conclusion-${sessionId}.md`;
+
+            const objectUrl = URL.createObjectURL(blob);
+            const link = document.createElement('a');
+            link.href = objectUrl;
+            link.download = filename;
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            setTimeout(() => URL.revokeObjectURL(objectUrl), 2000);
+
+            this._showToast({
+                title: 'Conclusion downloaded',
+                message: `Saved ${filename}.`,
+                state: 'ready',
+            });
+        } catch (err) {
+            this._showToast({
+                title: 'Download failed',
+                message: `Could not download conclusion: ${err.message}`,
+                state: 'error',
+            });
+        }
     }
 }
 
