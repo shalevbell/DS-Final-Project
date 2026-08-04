@@ -5,7 +5,11 @@ Registers HTTP endpoints for health checks and frontend serving.
 """
 
 import logging
-from flask import Flask, jsonify, request, send_from_directory, send_file
+import re
+
+import eventlet
+import eventlet.tpool
+from flask import Flask, Response, jsonify, request, send_from_directory, send_file
 from chunk_processor import ChunkProcessor
 from services.connection_manager import check_postgres_health, check_redis_health
 from services.model_loader import get_preload_status
@@ -197,7 +201,6 @@ def register_http_routes(app: Flask, chunk_processor: ChunkProcessor, frontend_d
         try:
             from app import socketio
             from services.session_conclusion import generate_and_emit_conclusion
-            import eventlet
             eventlet.spawn_n(generate_and_emit_conclusion, session_id, socketio)
         except Exception as e:
             logger.warning(f'Conclusion generation via complete endpoint failed for {session_id}: {e}')
@@ -214,7 +217,6 @@ def register_http_routes(app: Flask, chunk_processor: ChunkProcessor, frontend_d
         conclusion = data.get('conclusion')
         if not conclusion and data.get('status') == 'completed':
             try:
-                import eventlet
                 from services.session_conclusion import build_session_conclusion, save_session_conclusion
                 conclusion = eventlet.tpool.execute(build_session_conclusion, session_id)
                 if conclusion:
@@ -225,6 +227,42 @@ def register_http_routes(app: Flask, chunk_processor: ChunkProcessor, frontend_d
         if not conclusion:
             return jsonify({'status': 'pending', 'session_id': session_id}), 202
         return jsonify({'session_id': session_id, 'conclusion': conclusion}), 200
+
+    @app.route('/api/sessions/<session_id>/conclusion.md', methods=['GET'])
+    def session_conclusion_markdown(session_id):
+        """Return the session conclusion as a downloadable Markdown file."""
+        data = get_session_conclusion(session_id)
+        if not data:
+            return jsonify({'error': 'Session not found'}), 404
+
+        conclusion = data.get('conclusion')
+        if not conclusion and data.get('status') == 'completed':
+            try:
+                from services.session_conclusion import build_session_conclusion, save_session_conclusion
+                conclusion = eventlet.tpool.execute(build_session_conclusion, session_id)
+                if conclusion:
+                    eventlet.tpool.execute(save_session_conclusion, session_id, conclusion)
+            except Exception as e:
+                logger.warning(f'On-demand conclusion build failed for {session_id}: {e}')
+
+        if not conclusion:
+            return jsonify({'status': 'pending', 'session_id': session_id}), 202
+
+        from services.session_conclusion import build_conclusion_markdown
+        markdown = build_conclusion_markdown(conclusion)
+
+        candidate = conclusion.get('candidate_name') or 'candidate'
+        safe_name = re.sub(r'[^\w\-]+', '_', candidate).strip('_') or 'candidate'
+        filename = f'interview-conclusion-{safe_name}.md'
+
+        return Response(
+            markdown,
+            mimetype='text/markdown; charset=utf-8',
+            headers={
+                'Content-Disposition': f'attachment; filename="{filename}"',
+                'Cache-Control': 'no-store',
+            },
+        )
 
     @app.route('/api/sessions/<session_id>/resume', methods=['GET'])
     def session_resume_download(session_id):

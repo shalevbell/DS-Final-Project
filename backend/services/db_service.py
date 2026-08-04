@@ -127,7 +127,9 @@ def save_session(
 
 def complete_session(session_id: str) -> bool:
     """
-    Mark a session as completed with the current timestamp.
+    Mark a session as completed. Idempotent — preserves the original ended_at
+    if the session was already completed, so late fallback callers (disconnect
+    handler after a proper stream_ended) don't overwrite the real end time.
 
     Returns:
         True on success, False on error
@@ -138,7 +140,8 @@ def complete_session(session_id: str) -> bool:
                 cur.execute(
                     """
                     UPDATE sessions
-                       SET ended_at = NOW(), status = 'completed'
+                       SET ended_at = COALESCE(ended_at, NOW()),
+                           status = 'completed'
                      WHERE session_id = %s
                     """,
                     (session_id,),

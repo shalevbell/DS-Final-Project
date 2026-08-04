@@ -11,6 +11,7 @@ from statistics import mean
 from typing import Any, Dict, List, Optional
 
 import eventlet
+import eventlet.tpool
 
 from services.connection_manager import get_redis_client
 from services.db_service import get_session_with_chunks, save_session_conclusion, get_session_conclusion
@@ -308,6 +309,154 @@ def build_session_conclusion(session_id: str) -> Optional[Dict[str, Any]]:
         'generated_at': datetime.now(timezone.utc).isoformat(),
     }
     return conclusion
+
+
+def _md_escape(value: Any) -> str:
+    if value is None:
+        return ''
+    text = str(value)
+    return text.replace('|', '\\|')
+
+
+def _format_iso_datetime(value: Optional[str]) -> str:
+    if not value:
+        return '-'
+    try:
+        dt = datetime.fromisoformat(value.replace('Z', '+00:00'))
+        return dt.strftime('%Y-%m-%d %H:%M UTC')
+    except Exception:
+        return value
+
+
+def build_conclusion_markdown(conclusion: Dict[str, Any]) -> str:
+    """Render a session conclusion as a stylized Markdown document."""
+    if not conclusion:
+        return '# Interview Conclusion\n\n_No conclusion data available._\n'
+
+    name = conclusion.get('candidate_name') or 'Candidate'
+    role = conclusion.get('target_role') or 'Not specified'
+    duration = conclusion.get('duration') or '-'
+    chunks_processed = conclusion.get('chunks_processed', 0)
+    questions = conclusion.get('questions') or {}
+    total_questions = questions.get('total_count', 0)
+    analytics = conclusion.get('analytics_summary') or {}
+    highlights = conclusion.get('highlights') or []
+    next_steps = conclusion.get('recommended_next_steps') or []
+    warmup = questions.get('resume_warmup') or []
+    followups = questions.get('ai_followup') or []
+    resume = conclusion.get('resume') or {}
+    requirements = conclusion.get('interview_requirements')
+
+    lines: List[str] = []
+    lines.append(f'# Interview Conclusion — {name}')
+    lines.append('')
+    lines.append(f'> **Session Complete.** Generated {_format_iso_datetime(conclusion.get("generated_at"))}.')
+    lines.append('')
+    lines.append('---')
+    lines.append('')
+
+    lines.append('## Executive Summary')
+    lines.append('')
+    lines.append(conclusion.get('executive_summary') or '_No summary was generated._')
+    lines.append('')
+
+    lines.append('## Session Overview')
+    lines.append('')
+    lines.append('| Field | Value |')
+    lines.append('| --- | --- |')
+    lines.append(f'| Candidate | **{_md_escape(name)}** |')
+    lines.append(f'| Target Role | {_md_escape(role)} |')
+    lines.append(f'| Duration | {_md_escape(duration)} |')
+    lines.append(f'| Started | {_md_escape(_format_iso_datetime(conclusion.get("started_at")))} |')
+    lines.append(f'| Ended | {_md_escape(_format_iso_datetime(conclusion.get("ended_at")))} |')
+    lines.append(f'| Chunks Analyzed | {chunks_processed} |')
+    lines.append(f'| Total Questions | {total_questions} |')
+    if analytics.get('primary_clifton_domain'):
+        lines.append(f'| Primary Clifton Domain | {_md_escape(analytics["primary_clifton_domain"])} |')
+    lines.append('')
+
+    lines.append('## Behavior and Voice Metrics')
+    lines.append('')
+    lines.append('| Metric | Value |')
+    lines.append('| --- | --- |')
+    if analytics.get('avg_stress_level') is not None:
+        lines.append(f'| Average Stress Level | **{analytics["avg_stress_level"]}%** |')
+    if analytics.get('avg_engagement_pct') is not None:
+        lines.append(f'| Average Engagement | **{analytics["avg_engagement_pct"]}%** |')
+    if analytics.get('avg_posture_pct') is not None:
+        lines.append(f'| Average Posture | **{analytics["avg_posture_pct"]}%** |')
+    if analytics.get('eye_contact_consistency_pct') is not None:
+        lines.append(f'| Eye Contact Consistency | **{analytics["eye_contact_consistency_pct"]}%** |')
+    if analytics.get('posture_stability_pct') is not None:
+        lines.append(f'| Posture Stability | **{analytics["posture_stability_pct"]}%** |')
+    if analytics.get('dominant_emotions'):
+        lines.append(f'| Dominant Visual Emotions | {_md_escape(", ".join(analytics["dominant_emotions"]))} |')
+    if analytics.get('dominant_voice_emotions'):
+        lines.append(f'| Dominant Voice Emotions | {_md_escape(", ".join(analytics["dominant_voice_emotions"]))} |')
+    if len(lines[-1].strip()) == 0 or lines[-1].startswith('| ---'):
+        lines.append('| _No behavior or voice signals were captured._ | |')
+    lines.append('')
+
+    lines.append('## Key Highlights')
+    lines.append('')
+    if highlights:
+        for item in highlights:
+            lines.append(f'- {item}')
+    else:
+        lines.append('_No highlights available._')
+    lines.append('')
+
+    lines.append('## Recommended Next Steps')
+    lines.append('')
+    if next_steps:
+        for item in next_steps:
+            lines.append(f'- {item}')
+    else:
+        lines.append('- Review the session recording and notes with the hiring team.')
+    lines.append('')
+
+    lines.append('## Resume-Based Warm-Up Questions')
+    lines.append('')
+    if warmup:
+        for idx, q in enumerate(warmup, start=1):
+            chunk_hint = f' _(chunk {q["chunk"]})_' if q.get('chunk') is not None else ''
+            lines.append(f'{idx}. {q.get("text", "").strip()}{chunk_hint}')
+    else:
+        lines.append('_No resume-based warm-up questions were generated._')
+    lines.append('')
+
+    lines.append('## AI Follow-Up Questions')
+    lines.append('')
+    if followups:
+        for idx, q in enumerate(followups, start=1):
+            chunk_hint = f' _(chunk {q["chunk"]})_' if q.get('chunk') is not None else ''
+            lines.append(f'{idx}. {q.get("text", "").strip()}{chunk_hint}')
+    else:
+        lines.append('_No AI follow-up questions were generated during this session._')
+    lines.append('')
+
+    lines.append('## Resume File')
+    lines.append('')
+    if resume.get('filename'):
+        lines.append(f'- File: **{_md_escape(resume["filename"])}**')
+        if resume.get('download_url'):
+            lines.append(f'- Download: [{_md_escape(resume["filename"])}]({resume["download_url"]})')
+    else:
+        lines.append('_No resume was attached for this session._')
+    lines.append('')
+
+    if requirements:
+        lines.append('## Interviewer Requirements')
+        lines.append('')
+        lines.append(f'> {requirements}')
+        lines.append('')
+
+    lines.append('---')
+    lines.append('')
+    lines.append(f'_Session ID: `{conclusion.get("session_id", "")}`_')
+    lines.append('')
+
+    return '\n'.join(lines)
 
 
 def generate_and_emit_conclusion(session_id: str, socketio) -> None:

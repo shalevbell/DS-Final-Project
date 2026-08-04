@@ -64,9 +64,15 @@ class ChunkProcessor:
         self.reconnect_delay = reconnect_delay
         self.socketio = socketio_instance
 
-        # Create separate Redis clients (PUBSUB requires dedicated connection)
-        self.redis_pubsub_client: Optional[redis.Redis] = None
-        self.redis_data_client: Optional[redis.Redis] = None
+        # Redis clients are held per OS thread via thread-local storage.
+        # redis-py's ConnectionPool uses a threading.Lock; under eventlet
+        # monkey-patching that becomes an eventlet Semaphore, whose waiters
+        # cannot switch across OS thread boundaries. Sharing one client between
+        # the PUBSUB listener thread, chunk worker threads, and the Ollama
+        # background thread triggers `greenlet.error: Cannot switch to a
+        # different thread` and silently hangs the operation whose acquire is
+        # in flight. A per-thread client keeps every acquire/release local.
+        self._tls = _orig_threading.local()
         self.pubsub: Optional[redis.client.PubSub] = None
 
         # Initialize processing queue
@@ -94,25 +100,31 @@ class ChunkProcessor:
             f'queue={queue_size}, channel={pubsub_channel}'
         )
 
+    def _get_redis_pubsub_client(self) -> redis.Redis:
+        """Return a Redis client (text mode) local to the calling OS thread."""
+        cli = getattr(self._tls, 'redis_pubsub', None)
+        if cli is None:
+            cli = redis.from_url(self.redis_url, decode_responses=True)
+            cli.ping()
+            self._tls.redis_pubsub = cli
+        return cli
+
+    def _get_redis_data_client(self) -> redis.Redis:
+        """Return a Redis client (binary mode) local to the calling OS thread."""
+        cli = getattr(self._tls, 'redis_data', None)
+        if cli is None:
+            cli = redis.from_url(self.redis_url, decode_responses=False)
+            cli.ping()
+            self._tls.redis_data = cli
+        return cli
+
     def _connect_redis(self):
-        """Initialize Redis connections."""
+        """Sanity-check Redis reachability. Actual clients are per-thread."""
         try:
-            # PUBSUB connection (dedicated)
-            self.redis_pubsub_client = redis.from_url(
-                self.redis_url,
-                decode_responses=True  # Decode for message parsing
-            )
-            self.redis_pubsub_client.ping()
-
-            # Data connection (for retrieving/storing chunks)
-            self.redis_data_client = redis.from_url(
-                self.redis_url,
-                decode_responses=False  # Binary mode for video/audio
-            )
-            self.redis_data_client.ping()
-
-            logger.info('Redis connections established for chunk processor')
-
+            probe = redis.from_url(self.redis_url, decode_responses=True)
+            probe.ping()
+            probe.close()
+            logger.info('Redis connectivity verified for chunk processor')
         except Exception as e:
             logger.error(f'Redis connection failed: {e}')
             raise
@@ -139,8 +151,8 @@ class ChunkProcessor:
 
         while not self.shutdown_event.is_set():
             try:
-                # Create PUBSUB subscription
-                self.pubsub = self.redis_pubsub_client.pubsub()
+                # Create PUBSUB subscription using this OS thread's own client
+                self.pubsub = self._get_redis_pubsub_client().pubsub()
                 self.pubsub.subscribe(self.pubsub_channel)
 
                 logger.info(f'Subscribed to channel: {self.pubsub_channel}')
@@ -409,7 +421,7 @@ class ChunkProcessor:
 
             # Store result to Redis under the standard per-model key
             result_key = get_chunk_results_key(session_id, chunk_index, 'interviewer_ollama')
-            self.redis_data_client.setex(result_key, 3600, json.dumps(result))
+            self._get_redis_data_client().setex(result_key, 3600, json.dumps(result))
 
             # Merge Ollama result into the existing chunk_results row (JSONB ||)
             try:
@@ -450,9 +462,10 @@ class ChunkProcessor:
             meta_key = get_chunk_meta_key(session_id, chunk_index)
 
             # Retrieve data
-            video_bytes = self.redis_data_client.get(video_key)
-            audio_bytes = self.redis_data_client.get(audio_key)
-            meta_json = self.redis_data_client.get(meta_key)
+            r = self._get_redis_data_client()
+            video_bytes = r.get(video_key)
+            audio_bytes = r.get(audio_key)
+            meta_json = r.get(meta_key)
 
             # Parse metadata
             meta = json.loads(meta_json.decode('utf-8')) if meta_json else {}
@@ -473,7 +486,7 @@ class ChunkProcessor:
             results: Analysis results dictionary
         """
         try:
-            pipe = self.redis_data_client.pipeline()
+            pipe = self._get_redis_data_client().pipeline()
 
             # Store each model's results separately
             for model in get_available_models():
@@ -500,7 +513,7 @@ class ChunkProcessor:
         """
         try:
             key = get_chunk_status_key(session_id, chunk_index)
-            self.redis_data_client.setex(key, 3600, status)
+            self._get_redis_data_client().setex(key, 3600, status)
         except Exception as e:
             logger.warning(f'Error setting status for {session_id}:{chunk_index}: {e}')
 
@@ -524,7 +537,7 @@ class ChunkProcessor:
             }
 
             error_key = get_chunk_error_key(session_id, chunk_index)
-            self.redis_data_client.setex(error_key, 3600, json.dumps(error_data))
+            self._get_redis_data_client().setex(error_key, 3600, json.dumps(error_data))
 
             # Persist failure record to PostgreSQL
             try:
@@ -593,17 +606,7 @@ class ChunkProcessor:
             except Exception as e:
                 logger.warning(f'Error closing PUBSUB: {e}')
 
-        # Close Redis connections
-        if self.redis_pubsub_client:
-            try:
-                self.redis_pubsub_client.close()
-            except Exception as e:
-                logger.warning(f'Error closing Redis PUBSUB client: {e}')
-
-        if self.redis_data_client:
-            try:
-                self.redis_data_client.close()
-            except Exception as e:
-                logger.warning(f'Error closing Redis data client: {e}')
+        # Per-thread Redis clients are closed lazily by the OS threads exiting.
+        # We don't hold references to other threads' clients, so nothing to do here.
 
         logger.info('Chunk processor shutdown complete')

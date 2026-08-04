@@ -9,6 +9,7 @@ import time
 import json
 import shutil
 from datetime import datetime, timezone
+from flask import request
 from flask_socketio import SocketIO, emit
 import eventlet
 
@@ -22,6 +23,13 @@ from services.resume_storage import save_session_resume
 from services.session_conclusion import generate_and_emit_conclusion
 
 logger = logging.getLogger(__name__)
+
+# Maps SocketIO sid -> session_id for sessions still streaming. Entry is added
+# on stream_ready and removed on stream_ended. If disconnect fires while an
+# entry is still present, the session was terminated abnormally (browser crash,
+# force-quit, network drop, backend greenlet error) — we mark it completed as
+# a fallback so it doesn't stay stuck in 'active' forever.
+_ACTIVE_SIDS: dict = {}
 
 
 def register_socketio_handlers(socketio: SocketIO, config: Config):
@@ -47,8 +55,46 @@ def register_socketio_handlers(socketio: SocketIO, config: Config):
 
     @socketio.on('disconnect')
     def handle_disconnect():
-        """Handle client disconnection."""
-        logger.info('Client disconnected')
+        """Handle client disconnection.
+
+        If the disconnect happens while a session is still streaming (no
+        stream_ended was received), treat it as an abnormal termination and
+        complete the session so it doesn't stay stuck in 'active'. Conclusion
+        generation is spawned in the same way as a clean stream_ended.
+        """
+        sid = getattr(request, 'sid', None)
+        session_id = _ACTIVE_SIDS.pop(sid, None) if sid else None
+        logger.info(f'Client disconnected (sid={sid}, orphaned_session={session_id})')
+
+        if not session_id:
+            return
+
+        logger.warning(
+            f'Abnormal disconnect for session {session_id} — no stream_ended received. '
+            f'Marking session completed as fallback.'
+        )
+
+        r = get_redis_client()
+        if r:
+            try:
+                info_key = f'session:{session_id}:info'
+                existing = r.get(info_key)
+                if existing:
+                    meta = json.loads(existing.decode('utf-8') if isinstance(existing, bytes) else existing)
+                    meta['status'] = 'completed'
+                    r.setex(info_key, 3600, json.dumps(meta))
+            except Exception as e:
+                logger.warning(f'Redis session status update failed during disconnect fallback: {e}')
+
+        try:
+            complete_session(session_id)
+        except Exception as e:
+            logger.warning(f'DB complete_session failed during disconnect fallback for {session_id}: {e}')
+
+        try:
+            eventlet.spawn_n(generate_and_emit_conclusion, session_id, socketio)
+        except Exception as e:
+            logger.warning(f'Conclusion generation failed to start during disconnect fallback for {session_id}: {e}')
 
     @socketio.on('request_camera_permission')
     def handle_camera_permission_request():
@@ -67,6 +113,10 @@ def register_socketio_handlers(socketio: SocketIO, config: Config):
             target_role = (data.get('targetRole') or '').strip()
             interview_requirements = (data.get('interviewRequirements') or '').strip()
             logger.info(f'Stream ready: {session_id} (candidate: {candidate_name})')
+
+            sid = getattr(request, 'sid', None)
+            if sid and session_id:
+                _ACTIVE_SIDS[sid] = session_id
 
             # Initialize stream storage in Redis
             if session_id:
@@ -216,6 +266,10 @@ def register_socketio_handlers(socketio: SocketIO, config: Config):
         session_id = data.get('sessionId')
         if not session_id:
             return
+
+        sid = getattr(request, 'sid', None)
+        if sid:
+            _ACTIVE_SIDS.pop(sid, None)
 
         logger.info(f'Stream ended: {session_id}')
 
